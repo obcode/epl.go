@@ -1,5 +1,5 @@
-# Build output. Das Binary heißt wie ein Verzeichnis wäre — nach `go build -o epl .` bricht
-# gowatch, deshalb im Zweifel `go run .` benutzen.
+# Build output. Das Binary muss `epl` heißen, nicht `epl.go` — sonst kompiliert der nächste
+# Build das eigene Binary als Quelldatei mit. Erzwungen in `gowatch.yml`.
 /epl
 /dist/
 

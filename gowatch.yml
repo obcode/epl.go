@@ -1,0 +1,15 @@
+# gowatch configuration.
+#
+# Without this file gowatch names the binary after the current directory, i.e.
+# "epl.go" — and a file named *.go in the package directory is fed to the
+# compiler on the next build ("illegal character U+007F", the ELF magic byte).
+# Writing it also retriggers the watcher, so the build loops forever.
+#
+# Hence: build to ./epl, which .gitignore already covers.
+appname: "epl"
+
+vendor_watch: false
+build_pkg: ""
+build_tags: ""
+disable_run: false
+log_level: "info"
