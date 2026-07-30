@@ -1,0 +1,65 @@
+version: 2
+
+# Version-Updates für alle drei Quellen, aus denen dieses Repo Fremdcode zieht:
+# Go-Module, Actions in der Pipeline, Base-Images im Dockerfile.
+#
+# Die commit-message-Präfixe sind nicht kosmetisch: go-semantic-release leitet den
+# Release daraus ab (siehe ci.yml, Job `release`). Ein `chore` erzeugt keinen Release —
+# und ohne Release baut docker.yml kein Image und dispatcht keinen Deploy. Was auf dem
+# Server ankommen soll, muss also `fix` sein.
+
+updates:
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 5
+    # Go kennt keine dev-dependencies — alles hier landet im Binary. Deshalb `fix`:
+    # ein Sicherheitsfix soll nicht in main liegenbleiben, sondern durchrollen.
+    commit-message:
+      prefix: fix(deps)
+    groups:
+      # Ein PR statt zehn. Majors bleiben bewusst einzeln — die will man lesen.
+      go-modules:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    # Ändert nur die Pipeline, nicht das ausgelieferte Artefakt → kein Release.
+    commit-message:
+      prefix: chore(ci)
+    groups:
+      actions:
+        patterns: ["*"]
+        update-types: [minor, patch]
+
+  - package-ecosystem: docker
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Europe/Berlin
+    open-pull-requests-limit: 3
+    # Das Base-Image steckt im ausgelieferten Image → Patch-Release, damit auch
+    # tatsächlich neu gebaut und ausgerollt wird.
+    #
+    # Greift nur für `golang:1.26-alpine`. Die Runtime-Stufe steht auf `alpine:latest`,
+    # und an einem `latest` hat Dependabot nichts zu vergleichen — das bleibt liegen,
+    # bis der Tag gepinnt wird.
+    commit-message:
+      prefix: fix(docker)
+    groups:
+      docker-images:
+        patterns: ["*"]
+        update-types: [minor, patch]
