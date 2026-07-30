@@ -17,6 +17,16 @@ updates:
       time: "06:00"
       timezone: Europe/Berlin
     open-pull-requests-limit: 5
+    # Karenzzeit: ein frisch veröffentlichtes Modul soll nicht am selben Tag in go.sum
+    # landen. Der Proxy und sum.golang.org schützen gegen nachträgliche Manipulation
+    # einer Version, nicht gegen eine von vornherein bösartige neue — dagegen hilft nur
+    # Abstand. Majors bekommen mehr Zeit, weil sich die Fehler eines .0-Releases erst
+    # zeigen müssen.
+    cooldown:
+      default-days: 3
+      semver-patch-days: 3
+      semver-minor-days: 7
+      semver-major-days: 14
     # Go kennt keine dev-dependencies — alles hier landet im Binary. Deshalb `fix`:
     # ein Sicherheitsfix soll nicht in main liegenbleiben, sondern durchrollen.
     commit-message:
@@ -35,6 +45,10 @@ updates:
       time: "06:00"
       timezone: Europe/Berlin
     open-pull-requests-limit: 3
+    # Actions kennen kein SemVer, hier greift nur default-days. Eine unterwanderte
+    # Action ist der klassische CI-Angriffsweg — eine Woche Abstand ist billig.
+    cooldown:
+      default-days: 7
     # Ändert nur die Pipeline, nicht das ausgelieferte Artefakt → kein Release.
     commit-message:
       prefix: chore(ci)
@@ -51,6 +65,9 @@ updates:
       time: "06:00"
       timezone: Europe/Berlin
     open-pull-requests-limit: 3
+    # Docker-Tags kennen kein SemVer, hier greift nur default-days.
+    cooldown:
+      default-days: 7
     # Das Base-Image steckt im ausgelieferten Image → Patch-Release, damit auch
     # tatsächlich neu gebaut und ausgerollt wird. Deshalb ist die Runtime-Stufe im
     # Dockerfile auf eine Patch-Version gepinnt statt auf `latest`.
