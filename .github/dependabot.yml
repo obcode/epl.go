@@ -52,11 +52,8 @@ updates:
       timezone: Europe/Berlin
     open-pull-requests-limit: 3
     # Das Base-Image steckt im ausgelieferten Image → Patch-Release, damit auch
-    # tatsächlich neu gebaut und ausgerollt wird.
-    #
-    # Greift nur für `golang:1.26-alpine`. Die Runtime-Stufe steht auf `alpine:latest`,
-    # und an einem `latest` hat Dependabot nichts zu vergleichen — das bleibt liegen,
-    # bis der Tag gepinnt wird.
+    # tatsächlich neu gebaut und ausgerollt wird. Deshalb ist die Runtime-Stufe im
+    # Dockerfile auf eine Patch-Version gepinnt statt auf `latest`.
     commit-message:
       prefix: fix(docker)
     groups:

@@ -17,7 +17,12 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT} -X main.date=${BUILD_TIME}" \
     -o /out/epl .
 
-FROM alpine:latest
+# Auf die Patch-Version gepinnt, nicht `latest` und nicht `3.24`: nur an einem
+# vergleichbaren Tag kann Dependabot ein Update erkennen. Der PR wird zu einem
+# fix(docker)-Commit, der einen Patch-Release erzeugt — und erst der baut das Image neu
+# und rollt es aus. Mit einem gleitenden Tag bliebe ein Base-Image-CVE ungefixt, weil
+# ohne Release nie neu gebaut wird.
+FROM alpine:3.24.1
 
 # tzdata ist Pflicht, nicht Komfort: main.go setzt time.Local auf Europe/Berlin, und
 # Meilenstein-Fristen sowie Phasenwechsel hängen daran. Ohne tzdata fiele der Prozess
