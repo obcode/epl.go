@@ -12,11 +12,11 @@ jobs:
   lint:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
-      - uses: golangci/golangci-lint-action@v7
+      - uses: golangci/golangci-lint-action@v8
         with:
           version: latest
           args: --timeout=10m
@@ -43,8 +43,8 @@ jobs:
       # und "nie gelaufen" sähen dann gleich aus.
       EPL_TEST_DB_REQUIRED: "1"
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: go.mod
       - run: go build ./...
@@ -52,12 +52,16 @@ jobs:
 
   release:
     needs: [lint, test]
-    if: github.ref == 'refs/heads/main'
+    # Feature-Gate wie beim Deploy: erst auf true stellen, wenn das Secret RELEASE_TOKEN
+    # angelegt ist. secrets lassen sich in einem job-level `if` nicht auswerten, deshalb
+    # eine Repo-Variable. Bis dahin bleibt die Pipeline grün, statt bei jedem Push an einer
+    # fehlenden Konfiguration zu scheitern.
+    if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     permissions:
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
           persist-credentials: false
