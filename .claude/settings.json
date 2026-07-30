@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(go build:*)",
+      "Bash(go vet:*)",
+      "Bash(go test:*)",
+      "Bash(go generate:*)",
+      "Bash(go run:*)",
+      "Bash(go mod:*)",
+      "Bash(go list:*)",
+      "Bash(gofmt -l:*)",
+      "Bash(golangci-lint-v2 run:*)",
+      "Bash(sqlc generate)",
+      "Bash(sqlc vet)",
+      "Bash(goose -dir db/migrations status)"
+    ]
+  }
+}

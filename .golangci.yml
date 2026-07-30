@@ -1,0 +1,50 @@
+# golangci-lint v2 configuration.
+#
+# Pinned deliberately: relying on the tool's defaults plus `version: latest` in CI means the
+# build can break because someone else released something. Explicit is cheaper.
+
+version: "2"
+
+run:
+  timeout: 5m
+
+linters:
+  default: standard
+  enable:
+    - bodyclose
+    - errorlint
+    - gocritic
+    - misspell
+    - nilerr
+    - revive
+    - sqlclosecheck
+    - rowserrcheck
+    - unconvert
+    - wastedassign
+
+  settings:
+    revive:
+      rules:
+        - name: exported
+          # Exported identifiers want a doc comment, but not loudly enough to block work in
+          # progress. Warning level, not error.
+          severity: warning
+
+  exclusions:
+    generated: lax
+    rules:
+      # Generated code is not ours to lint.
+      - path: (graph/generated/|models_gen\.go|\.sql\.go)$
+        linters: [revive, gocritic, unconvert, misspell, errorlint]
+      # Tests may shadow and ignore more freely.
+      - path: _test\.go$
+        linters: [errcheck, gocritic]
+
+formatters:
+  enable:
+    - gofmt
+    - goimports
+  settings:
+    goimports:
+      local-prefixes:
+        - github.com/obcode/epl.go

@@ -1,0 +1,24 @@
+# gitleaks configuration for epl.go
+#
+# Extends the upstream default ruleset and adds the EPL Personal Access Token format.
+# The realistic leak path is not the server — it is a colleague pasting their evaluation
+# script, token and all, into a commit. This rule costs nothing and catches that.
+
+[extend]
+useDefault = true
+
+[[rules]]
+id = "epl-personal-access-token"
+description = "EPL Personal Access Token"
+# epl_<16 chars Crockford base32, uppercase>_<43 chars base64url>
+regex = '''epl_[0-9A-HJKMNP-TV-Z]{16}_[A-Za-z0-9_-]{43}'''
+tags = ["epl", "token"]
+
+[rules.allowlist]
+# Documentation and tests deliberately show the shape of a token. Anything that is all
+# A's or literally says "example"/"nonsense" is not a real secret.
+regexTarget = "match"
+regexes = [
+  '''epl_A{16}_''',
+  '''epl_[0-9A-HJKMNP-TV-Z]{16}_(example|nonsense|xxx)''',
+]
