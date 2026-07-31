@@ -124,6 +124,30 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
+  # Eine Backend-Änderung kann die GUI brechen, ohne dass in tallox.gui etwas committet wird —
+  # ein umbenanntes Feld, ein Resolver, der jetzt null liefert. Der E2E-Lauf dort baut dieses
+  # Repository mit und ist die einzige Stufe, die das bemerkt; ohne diesen Anstoß liefe er
+  # aber erst beim nächsten GUI-Commit, also möglicherweise Wochen später.
+  #
+  # Feature-Gate wie beim Release: das braucht ein Token mit Schreibrecht auf tallox.gui.
+  # Bis es angelegt ist, bleibt die Stufe still, statt bei jedem Push an einer fehlenden
+  # Konfiguration zu scheitern.
+  notify-gui:
+    needs: [lint, generate, test, test-from-scratch]
+    if: ${{ github.ref == 'refs/heads/main' && vars.GUI_E2E_DISPATCH_ENABLED == 'true' }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: dispatch to tallox.gui
+        env:
+          GH_TOKEN: ${{ secrets.GUI_DISPATCH_TOKEN }}
+          # Niemals ${{ }} direkt in `run:` — der Wert würde in die Shell-Zeile interpoliert.
+          SHA: ${{ github.sha }}
+        run: |
+          gh api repos/obcode/tallox.gui/dispatches \
+            --method POST \
+            --field event_type=backend-changed \
+            --field "client_payload[sha]=${SHA}"
+
   release:
     needs: [lint, generate, test, test-from-scratch]
     # Feature-Gate wie beim Deploy: erst auf true stellen, wenn das Secret RELEASE_TOKEN
