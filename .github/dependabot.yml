@@ -1,12 +1,12 @@
 version: 2
 
-# Version-Updates für alle drei Quellen, aus denen dieses Repo Fremdcode zieht:
-# Go-Module, Actions in der Pipeline, Base-Images im Dockerfile.
+# Version updates for all three sources of third-party code in this repository: Go
+# modules, actions in the pipeline, base images in the Dockerfile.
 #
-# Die commit-message-Präfixe sind nicht kosmetisch: go-semantic-release leitet den
-# Release daraus ab (siehe ci.yml, Job `release`). Ein `chore` erzeugt keinen Release —
-# und ohne Release baut docker.yml kein Image und dispatcht keinen Deploy. Was auf dem
-# Server ankommen soll, muss also `fix` sein.
+# The commit-message prefixes are not cosmetic: go-semantic-release derives the release
+# from them (see ci.yml, job `release`). A `chore` produces no release — and without a
+# release docker.yml builds no image and dispatches no deploy. Anything that has to reach
+# the server therefore has to be a `fix`.
 
 updates:
   - package-ecosystem: gomod
@@ -17,22 +17,22 @@ updates:
       time: "06:00"
       timezone: Europe/Berlin
     open-pull-requests-limit: 5
-    # Karenzzeit: ein frisch veröffentlichtes Modul soll nicht am selben Tag in go.sum
-    # landen. Der Proxy und sum.golang.org schützen gegen nachträgliche Manipulation
-    # einer Version, nicht gegen eine von vornherein bösartige neue — dagegen hilft nur
-    # Abstand. Majors bekommen mehr Zeit, weil sich die Fehler eines .0-Releases erst
-    # zeigen müssen.
+    # A grace period: a freshly published module should not land in go.sum the same day.
+    # The proxy and sum.golang.org protect against a version being tampered with after
+    # the fact, not against one that is malicious from the start — only distance helps
+    # with that. Majors get longer, because the mistakes in a .0 release need time to
+    # surface.
     cooldown:
       default-days: 3
       semver-patch-days: 3
       semver-minor-days: 7
       semver-major-days: 14
-    # Go kennt keine dev-dependencies — alles hier landet im Binary. Deshalb `fix`:
-    # ein Sicherheitsfix soll nicht in main liegenbleiben, sondern durchrollen.
+    # Go has no dev dependencies — everything here ends up in the binary. Hence `fix`:
+    # a security fix should roll all the way out rather than sit in main.
     commit-message:
       prefix: fix(deps)
     groups:
-      # Ein PR statt zehn. Majors bleiben bewusst einzeln — die will man lesen.
+      # One PR instead of ten. Majors stay separate on purpose — those want reading.
       go-modules:
         patterns: ["*"]
         update-types: [minor, patch]
@@ -45,11 +45,11 @@ updates:
       time: "06:00"
       timezone: Europe/Berlin
     open-pull-requests-limit: 3
-    # Actions kennen kein SemVer, hier greift nur default-days. Eine unterwanderte
-    # Action ist der klassische CI-Angriffsweg — eine Woche Abstand ist billig.
+    # Actions have no SemVer, so only default-days applies. A subverted action is the
+    # classic way into a CI pipeline — a week of distance is cheap.
     cooldown:
       default-days: 7
-    # Ändert nur die Pipeline, nicht das ausgelieferte Artefakt → kein Release.
+    # Changes the pipeline, not the shipped artefact → no release.
     commit-message:
       prefix: chore(ci)
     groups:
@@ -65,12 +65,12 @@ updates:
       time: "06:00"
       timezone: Europe/Berlin
     open-pull-requests-limit: 3
-    # Docker-Tags kennen kein SemVer, hier greift nur default-days.
+    # Docker tags have no SemVer, so only default-days applies.
     cooldown:
       default-days: 7
-    # Das Base-Image steckt im ausgelieferten Image → Patch-Release, damit auch
-    # tatsächlich neu gebaut und ausgerollt wird. Deshalb ist die Runtime-Stufe im
-    # Dockerfile auf eine Patch-Version gepinnt statt auf `latest`.
+    # The base image is part of the shipped image → a patch release, so that it actually
+    # gets rebuilt and rolled out. That is also why the runtime stage in the Dockerfile is
+    # pinned to a patch version rather than to `latest`.
     commit-message:
       prefix: fix(docker)
     groups:

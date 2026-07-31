@@ -25,8 +25,29 @@ import (
 
 	"github.com/obcode/tallox.go/graph"
 	"github.com/obcode/tallox.go/graph/generated"
+	"github.com/obcode/tallox.go/internal/auth"
 	"github.com/obcode/tallox.go/internal/buildinfo"
+	"github.com/obcode/tallox.go/internal/store"
 )
+
+// EnvDatabaseURL is where the connection string comes from.
+//
+// The environment rather than the configuration file, because it is the one value that
+// differs between the DevContainer, CI and the host, and because it is the value a deploy
+// script sets. Secrets that are not per-environment belong in tallox.yaml.
+const EnvDatabaseURL = "TALLOX_DB_URL"
+
+// Options is everything Handler needs. A struct rather than a parameter list: this grows with
+// every subsystem, and a positional bool that means "playground" in one call site and
+// something else in the next is a bug waiting for a hurried afternoon.
+type Options struct {
+	// Build is the version stamp, served by /healthz and by the buildInfo query.
+	Build buildinfo.Info
+	// Playground enables the GraphQL playground at "/".
+	Playground bool
+	// Auth configures both doors: the mode, and the two lookups.
+	Auth auth.Config
+}
 
 // Serve parses flags, sets up logging and runs the HTTP server until a signal arrives.
 func Serve(build buildinfo.Info) {
@@ -38,6 +59,13 @@ func Serve(build buildinfo.Info) {
 		// reachable from outside anyway. Introspection is a separate matter and stays on —
 		// see CLAUDE.md, the API is a product here.
 		playgroundEnabled = flag.Bool("playground", true, "serve the GraphQL playground at /")
+		// The default is production. A server that falls back to dev mode when nobody
+		// configured it is a server that hands out an administrator on the day somebody
+		// forgets a flag.
+		authMode = flag.String("auth-mode", string(auth.ModeProxy),
+			"how to authenticate: dev | proxy | off-token")
+		devUser = flag.String("auth-dev-user", auth.DefaultDevUser,
+			"mail address of the injected development user (auth-mode=dev only)")
 	)
 	flag.Parse()
 
@@ -48,9 +76,48 @@ func Serve(build buildinfo.Info) {
 		Str("builtAt", build.BuiltAt).
 		Msg("tallox starting")
 
+	mode, err := auth.ParseMode(*authMode)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot start")
+	}
+
+	dsn := os.Getenv(EnvDatabaseURL)
+	if dsn == "" {
+		log.Fatal().Str("variable", EnvDatabaseURL).
+			Msg("no database url — the server cannot authenticate anybody without one")
+	}
+
+	ctx := context.Background()
+
+	// Migrate before opening the pool that serves requests. Embedded migrations plus "apply at
+	// startup" means a container that has the binary has the schema, by construction: there is
+	// no deploy step that can copy one and forget the other.
+	applied, err := store.MigrateUpDSN(ctx, dsn)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot migrate the database")
+	}
+	log.Info().Int("applied", applied).Msg("migrations up to date")
+
+	pool, err := store.Open(ctx, dsn)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot reach the database")
+	}
+	defer pool.Close()
+
+	directory := store.NewDirectory(pool)
+
 	srv := &http.Server{
-		Addr:              *addr,
-		Handler:           router(build, *playgroundEnabled),
+		Addr: *addr,
+		Handler: Handler(Options{
+			Build:      build,
+			Playground: *playgroundEnabled,
+			Auth: auth.Config{
+				Mode:    mode,
+				Users:   directory,
+				Tokens:  directory,
+				DevUser: *devUser,
+			},
+		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -59,16 +126,16 @@ func Serve(build buildinfo.Info) {
 			log.Fatal().Err(err).Str("addr", *addr).Msg("cannot listen")
 		}
 	}()
-	log.Info().Str("addr", *addr).Msg("listening")
+	log.Info().Str("addr", *addr).Str("authMode", string(mode)).Msg("listening")
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
 	<-stop
 
 	log.Info().Msg("shutting down")
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("cannot shut down cleanly")
 	}
 }
@@ -80,11 +147,11 @@ func Serve(build buildinfo.Info) {
 // harness is correct; this one proves that the server is. Every rule that lands in the
 // middleware chain is therefore exercised by the integration tests automatically, including
 // the ones nobody remembered to write a test for.
-func Handler(build buildinfo.Info, playgroundEnabled bool) http.Handler {
-	return router(build, playgroundEnabled)
+func Handler(opts Options) http.Handler {
+	return router(opts)
 }
 
-func router(build buildinfo.Info, playgroundEnabled bool) http.Handler {
+func router(opts Options) http.Handler {
 	r := chi.NewRouter()
 
 	// Liveness for the container healthcheck and the deploy workflow. Deliberately outside
@@ -92,20 +159,28 @@ func router(build buildinfo.Info, playgroundEnabled bool) http.Handler {
 	r.Get("/healthz", func(w http.ResponseWriter, _ *http.Request) {
 		writeJSON(w, http.StatusOK, map[string]string{
 			"status":  "ok",
-			"version": build.Version,
+			"version": opts.Build.Version,
 		})
 	})
 
 	// ONE handler on both doors. /query gets the identity from the auth proxy's
 	// X-Remote-User, /api/graphql from a bearer token — but they share a schema, a resolver
 	// root and an AroundOperations chain, so a rule added for the browser cannot be missing
-	// on the token path. The authenticating middleware differs per mount and goes on here
-	// once it exists; the schema below it never does.
-	gql := graphqlHandler(build)
-	r.Handle("/query", gql)
-	r.Handle("/api/graphql", gql)
+	// on the token path. What differs is the authenticating middleware, and only that.
+	gql := graphqlHandler(opts.Build)
 
-	if playgroundEnabled {
+	r.With(auth.Middleware(auth.NewProxyAuthenticator(opts.Auth))).Handle("/query", gql)
+
+	if opts.Auth.Mode.TokenDoorEnabled() {
+		r.With(auth.Middleware(auth.NewTokenAuthenticator(opts.Auth))).Handle("/api/graphql", gql)
+	} else {
+		// Not mounted at all rather than mounted and refusing. The emergency stop has to
+		// leave no code path that could be wrong about whether it is engaged, and a 404 is
+		// also the honest answer: on this instance, that door does not exist.
+		log.Warn().Msg("auth.mode=off-token: /api/graphql is not served")
+	}
+
+	if opts.Playground {
 		r.Handle("/", playground.Handler("Tallox", "/query"))
 	}
 

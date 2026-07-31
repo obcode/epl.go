@@ -17,19 +17,18 @@ RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT} -X main.date=${BUILD_TIME}" \
     -o /out/tallox .
 
-# Auf die Patch-Version gepinnt, nicht `latest` und nicht `3.24`: nur an einem
-# vergleichbaren Tag kann Dependabot ein Update erkennen. Der PR wird zu einem
-# fix(docker)-Commit, der einen Patch-Release erzeugt — und erst der baut das Image neu
-# und rollt es aus. Mit einem gleitenden Tag bliebe ein Base-Image-CVE ungefixt, weil
-# ohne Release nie neu gebaut wird.
+# Pinned to the patch version, not `latest` and not `3.24`: only a comparable tag lets
+# Dependabot recognise an update. The PR becomes a fix(docker) commit, which produces a
+# patch release — and only that rebuilds and rolls out the image. With a floating tag a
+# base-image CVE would stay unfixed, because without a release nothing is ever rebuilt.
 FROM alpine:3.24.1
 
-# tzdata ist Pflicht, nicht Komfort: main.go setzt time.Local auf Europe/Berlin, und
-# Meilenstein-Fristen sowie Phasenwechsel hängen daran. Ohne tzdata fiele der Prozess
-# stillschweigend auf UTC zurück.
+# tzdata is mandatory, not a convenience: main.go sets time.Local to Europe/Berlin, and
+# milestone deadlines and phase transitions depend on it. Without tzdata the process would
+# silently fall back to UTC.
 RUN apk add --no-cache ca-certificates tzdata
 
-# Nicht als root. Feste UID, damit ein gemountetes Volume vorhersagbare Besitzverhältnisse hat.
+# Not as root. A fixed UID, so that a mounted volume has predictable ownership.
 RUN adduser -D -u 10001 tallox
 
 WORKDIR /app

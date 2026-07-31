@@ -43,3 +43,9 @@ models:
   # main and /healthz use the same struct.
   BuildInfo:
     model: github.com/obcode/tallox.go/internal/buildinfo.Info
+  # Bound to the policy's own type rather than generated as a second enum. The list of roles
+  # exists in three places that cannot import each other — the schema, internal/policy and the
+  # CHECK constraint in db/migrations — and binding removes one of the three. The remaining
+  # two are compared by tests (graph and internal/store).
+  Role:
+    model: github.com/obcode/tallox.go/internal/policy.Role

@@ -2,5 +2,24 @@
 
 package model
 
+import (
+	"github.com/obcode/tallox.go/internal/policy"
+)
+
+// A person in the planning.
+//
+// Deliberately lean. Personnel data — the teaching-load/overtime traffic light, free-text notes —
+// does not hang off this type and never will: it lives in root fields of its own, so that there
+// is no traversal path to it in the first place and the `@interactiveOnly` directive is a second
+// line of defence rather than the only one.
+type Person struct {
+	ID string `json:"id"`
+	// The identity the auth proxy asserts, and the natural key of a person.
+	Mail string `json:"mail"`
+	Name string `json:"name"`
+	// The grants this person holds, in a stable order.
+	Roles []policy.Role `json:"roles"`
+}
+
 type Query struct {
 }

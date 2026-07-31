@@ -2,10 +2,25 @@ version: "2"
 
 sql:
   - engine: postgresql
-    # Das Schema kommt aus den goose-Migrationen — eine einzige Quelle der Wahrheit, statt
-    # einer zusätzlich gepflegten schema.sql, die auseinanderlaufen kann.
+    # The schema comes from the goose migrations: one source of truth, rather than an
+    # additionally maintained schema.sql that can drift away from them.
     schema: db/migrations
     queries: db/queries
+
+    # For `sqlc vet`, not for `generate`: it prepares every query against a real database and
+    # therefore finds what the built-in parser lets through — a typo in a column name, a cast
+    # PostgreSQL resolves differently.
+    #
+    # `sqlc vet` needs a reachable database and so runs locally rather than in CI.
+    # `analyzer.database: false` keeps `sqlc generate` free of that requirement: code
+    # generation has to work without a running database, or a fresh clone cannot build.
+    database:
+      uri: "${TALLOX_DB_URL}"
+    analyzer:
+      database: false
+    rules:
+      - sqlc/db-prepare
+
     gen:
       go:
         package: store
@@ -26,6 +41,3 @@ sql:
             go_type: "time.Time"
           - db_type: "citext"
             go_type: "string"
-
-rules:
-  - sqlc/db-prepare

@@ -15,7 +15,7 @@ import (
 // TestAssertMatchesTheCommittedFile is the happy path, and it doubles as proof that the
 // committed fixture next to it is reachable from a test run in this package.
 func TestAssertMatchesTheCommittedFile(t *testing.T) {
-	golden.Assert(t, "example", "role\tphase\tvisible\nDOZENT\tWUNSCHPHASE\town only\n")
+	golden.Assert(t, "example", "role\tphase\tvisible\nLECTURER\tWISHES\town only\n")
 }
 
 // TestAssertTolerantOfTrailingNewlines covers the diff that would otherwise appear on every
@@ -23,7 +23,7 @@ func TestAssertMatchesTheCommittedFile(t *testing.T) {
 // enough, teaches reviewers to skim past golden diffs. That habit is the real risk: a
 // mechanism whose alerts get ignored protects nothing.
 func TestAssertTolerantOfTrailingNewlines(t *testing.T) {
-	golden.Assert(t, "example", "role\tphase\tvisible\nDOZENT\tWUNSCHPHASE\town only")
+	golden.Assert(t, "example", "role\tphase\tvisible\nLECTURER\tWISHES\town only")
 }
 
 // TestUpdateRecordsAndThenMatches exercises -update-golden, the path CI never takes.

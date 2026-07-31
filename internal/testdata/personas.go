@@ -19,28 +19,78 @@
 // for exactly this, so no test can accidentally send mail to a real person.
 package testdata
 
+import (
+	"github.com/google/uuid"
+
+	"github.com/obcode/tallox.go/internal/principal"
+)
+
 // Persona is one invented person, described by the part they play in a test rather than by an
 // organisational role.
 //
-// Roles (DOZENT, PLANER, …) deliberately do not appear here. They belong to internal/policy,
+// Roles (LECTURER, PROGRAMME_LEAD, …) deliberately do not appear here. They belong to
+// internal/policy,
 // which is where the rules that use them live; duplicating them into fixtures would create a
 // second list to keep in sync, and a stale role in a fixture makes a policy test pass while
-// the policy is wrong.
+// the policy is wrong. A test that needs a persona to hold a role says so at the call site —
+// see Actor.
 type Persona struct {
 	// Mail is the identity the auth proxy would put in X-Remote-User.
 	Mail string
 	// Name is what a GUI would render.
 	Name string
-	// Token is a Personal Access Token belonging to this persona, in the production format.
+	// TokenID is the public half of this persona's Personal Access Token: the part that is
+	// the primary key of the token table and appears in the audit log.
 	//
-	// The 16 A's are what the gitleaks allowlist recognises as "obviously not a real secret"
-	// — see .gitleaks.toml. Keep that prefix on any token added here, or committing the
-	// fixture will be blocked by the pre-commit hook.
+	// Distinct per persona, which is not cosmetic. Sharing one id across the cast would make
+	// "seed everybody with their token" — the obvious setup helper for an API test — fail on
+	// a primary key violation, and the natural repair is to seed fewer people, which quietly
+	// removes the colleague the confidentiality rule is about.
+	TokenID string
+	// Token is a Personal Access Token belonging to this persona, in the production format
+	// tallox_<TokenID>_<secret>.
+	//
+	// The secret begins with "example", which is what the gitleaks allowlist in
+	// .gitleaks.toml recognises as "obviously not a real secret". Keep that prefix on any
+	// token added here, or the pre-commit hook will block the commit that adds the persona.
 	Token string
 	// Part is the role this persona plays in a test scenario, in prose. Read it before using
 	// the persona for something else: swapping two personas around silently inverts what a
 	// visibility test proves, and the test still passes.
 	Part string
+}
+
+// ID is the person id this persona has wherever one is needed — the primary key a test
+// inserts, the owner of a record, the value a policy compares against.
+//
+// Derived from the mail address rather than random, so that the same persona has the same id
+// in a store test, in an API test and in a golden file. That is what lets a failure be read
+// across layers instead of being an opaque UUID in each of them. Anon has no identity and
+// gets uuid.Nil, which is exactly the value principal.Actor.Owns refuses to match.
+func (p Persona) ID() uuid.UUID {
+	if p.Mail == "" {
+		return uuid.Nil
+	}
+	return uuid.NewSHA1(uuid.NameSpaceURL, []byte("mailto:"+p.Mail))
+}
+
+// Actor builds the authenticated principal for this persona, with the roles the test needs.
+//
+// Roles are an argument rather than a field on the persona, deliberately — see the type
+// comment. The call site therefore says which grant the assertion depends on, which is the
+// thing a reader has to know and the thing that would otherwise be three files away.
+func (p Persona) Actor(kind principal.Kind, roles ...string) principal.Actor {
+	a := principal.Actor{
+		ID:    p.ID(),
+		Mail:  p.Mail,
+		Name:  p.Name,
+		Roles: roles,
+		Kind:  kind,
+	}
+	if kind == principal.KindToken {
+		a.TokenID = p.TokenID
+	}
+	return a
 }
 
 // The cast. Deliberately small: a fixture set large enough that nobody remembers who is who
@@ -49,10 +99,11 @@ var (
 	// Eins owns things. The wish under test is hers, the competence entry is hers, and she is
 	// the one for whom the answer is always "yes, you may see it".
 	Eins = Persona{
-		Mail:  "prof.eins@example.org",
-		Name:  "Prof. Eins",
-		Token: "tallox_AAAAAAAAAAAAAAAA_eins000000000000000000000000000000000000000",
-		Part:  "owns the record under test",
+		Mail:    "prof.eins@example.org",
+		Name:    "Prof. Eins",
+		TokenID: "AAAAAAAAAAAAAAAA",
+		Token:   "tallox_AAAAAAAAAAAAAAAA_example_eins_000000000000000000000000000000",
+		Part:    "owns the record under test",
 	}
 
 	// Zwei is the colleague. Same role as Eins, no relationship to the record — the person
@@ -60,48 +111,53 @@ var (
 	// really the question "what does Zwei see", and the interesting answer is "nothing, until
 	// publication".
 	Zwei = Persona{
-		Mail:  "prof.zwei@example.org",
-		Name:  "Prof. Zwei",
-		Token: "tallox_AAAAAAAAAAAAAAAA_zwei000000000000000000000000000000000000000",
-		Part:  "an unrelated colleague at the same level",
+		Mail:    "prof.zwei@example.org",
+		Name:    "Prof. Zwei",
+		TokenID: "BBBBBBBBBBBBBBBB",
+		Token:   "tallox_BBBBBBBBBBBBBBBB_example_zwei_000000000000000000000000000000",
+		Part:    "an unrelated colleague at the same level",
 	}
 
-	// Drei leads a Fachgruppe: allowed to assign within her group, not beyond it. The persona
+	// Drei leads a subject group: allowed to assign within it, not beyond it. The persona
 	// for "the permission exists but is scoped", which is the case a boolean role check gets
 	// wrong.
 	Drei = Persona{
-		Mail:  "prof.drei@example.org",
-		Name:  "Prof. Drei",
-		Token: "tallox_AAAAAAAAAAAAAAAA_drei000000000000000000000000000000000000000",
-		Part:  "leads one Fachgruppe — permitted inside it, not outside",
+		Mail:    "prof.drei@example.org",
+		Name:    "Prof. Drei",
+		TokenID: "CCCCCCCCCCCCCCCC",
+		Token:   "tallox_CCCCCCCCCCCCCCCC_example_drei_000000000000000000000000000000",
+		Part:    "leads one subject group — permitted inside it, not outside",
 	}
 
 	// Vier plans. Sees wishes before publication because the process requires it, which makes
 	// her the persona that proves the rule has an exception rather than a hole.
 	Vier = Persona{
-		Mail:  "prof.vier@example.org",
-		Name:  "Prof. Vier",
-		Token: "tallox_AAAAAAAAAAAAAAAA_vier000000000000000000000000000000000000000",
-		Part:  "plans — sees unpublished wishes by design",
+		Mail:    "prof.vier@example.org",
+		Name:    "Prof. Vier",
+		TokenID: "DDDDDDDDDDDDDDDD",
+		Token:   "tallox_DDDDDDDDDDDDDDDD_example_vier_000000000000000000000000000000",
+		Part:    "plans — sees unpublished wishes by design",
 	}
 
 	// Fuenf is the dean's office: reads everything, including across programmes, and changes
 	// almost nothing. Separate from Vier because "may read" and "may write" are different
 	// axes and a test that conflates them will not notice when they get conflated in code.
 	Fuenf = Persona{
-		Mail:  "dekanat@example.org",
-		Name:  "Dekanat",
-		Token: "tallox_AAAAAAAAAAAAAAAA_fuenf00000000000000000000000000000000000000",
-		Part:  "dean's office — reads across programmes, writes little",
+		Mail:    "dekanat@example.org",
+		Name:    "Deans Office",
+		TokenID: "EEEEEEEEEEEEEEEE",
+		Token:   "tallox_EEEEEEEEEEEEEEEE_example_fuenf_00000000000000000000000000000",
+		Part:    "dean's office — reads across programmes, writes little",
 	}
 
 	// Anon is nobody: no proxy header, no token. The persona for the questions that are easy
 	// to forget to ask, such as which fields answer before a session exists.
 	Anon = Persona{
-		Mail:  "",
-		Name:  "",
-		Token: "",
-		Part:  "unauthenticated",
+		Mail:    "",
+		Name:    "",
+		TokenID: "",
+		Token:   "",
+		Part:    "unauthenticated",
 	}
 )
 

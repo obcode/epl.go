@@ -34,8 +34,16 @@ type ComplexityRoot struct {
 		Version func(childComplexity int) int
 	}
 
+	Person struct {
+		ID    func(childComplexity int) int
+		Mail  func(childComplexity int) int
+		Name  func(childComplexity int) int
+		Roles func(childComplexity int) int
+	}
+
 	Query struct {
 		BuildInfo func(childComplexity int) int
+		Me        func(childComplexity int) int
 	}
 }
 
@@ -72,12 +80,44 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.BuildInfo.Version(childComplexity), true
 
+	case "Person.id":
+		if e.ComplexityRoot.Person.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Person.ID(childComplexity), true
+	case "Person.mail":
+		if e.ComplexityRoot.Person.Mail == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Person.Mail(childComplexity), true
+	case "Person.name":
+		if e.ComplexityRoot.Person.Name == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Person.Name(childComplexity), true
+	case "Person.roles":
+		if e.ComplexityRoot.Person.Roles == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Person.Roles(childComplexity), true
+
 	case "Query.buildInfo":
 		if e.ComplexityRoot.Query.BuildInfo == nil {
 			break
 		}
 
 		return e.ComplexityRoot.Query.BuildInfo(childComplexity), true
+
+	case "Query.me":
+		if e.ComplexityRoot.Query.Me == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Query.Me(childComplexity), true
 
 	}
 	return 0, false
@@ -146,6 +186,61 @@ func newExecutionContext(
 }
 
 var sources = []*ast.Source{
+	{Name: "../person.graphqls", Input: `"""
+A role grant.
+
+Roles are not a ladder. A person holds a set of them — the same colleague may lead a subject
+group and a study programme — so every rule asks about the set rather than about "the" role.
+
+The values are English; the GUI renders the German terms the faculty uses (Dozent:in,
+Fachgruppenleitung, Studiengangsleitung, Dekanat).
+"""
+enum Role {
+  "Teaches, maintains a profile and a competence profile, registers interest in instances."
+  LECTURER
+  "Assigns the instances of one subject group."
+  SUBJECT_GROUP_LEAD
+  "Declares the demand of one study programme: which instances are needed, and the catalogues."
+  PROGRAMME_LEAD
+  "Reads across programmes for the import/export statistics, maintains the teaching-load traffic light."
+  DEANS_OFFICE
+  "Administers users, roles and tokens. Deliberately not a reader of unpublished wishes."
+  ADMIN
+}
+
+"""
+A person in the planning.
+
+Deliberately lean. Personnel data — the teaching-load/overtime traffic light, free-text notes —
+does not hang off this type and never will: it lives in root fields of its own, so that there
+is no traversal path to it in the first place and the ` + "`" + `@interactiveOnly` + "`" + ` directive is a second
+line of defence rather than the only one.
+"""
+type Person {
+  id: ID!
+  "The identity the auth proxy asserts, and the natural key of a person."
+  mail: String!
+  name: String!
+  "The grants this person holds, in a stable order."
+  roles: [Role!]!
+}
+
+extend type Query {
+  """
+  The authenticated caller, or ` + "`" + `null` + "`" + ` when there is none.
+
+  ` + "`" + `null` + "`" + ` rather than an error, because "nobody is logged in" is a normal state that the GUI
+  renders (the login page) rather than an exception it has to catch. It is also the smallest
+  honest answer to "did my credential work": a script that gets a person back knows its token
+  is valid, its owner is active, and which roles it will be judged by — through exactly the
+  same field the browser uses.
+
+  NOTE: once the ` + "`" + `@scope` + "`" + ` directive lands this field needs an explicit
+  ` + "`" + `@scope(area: PROFILE, verb: READ)` + "`" + `, like every other root field.
+  """
+  me: Person
+}
+`, BuiltIn: false},
 	{Name: "../schema.graphqls", Input: `"""
 Version and provenance of the running server instance.
 
@@ -195,6 +290,20 @@ func (ec *executionContext) childFields_BuildInfo(ctx context.Context, field gra
 		return ec.fieldContext_BuildInfo_builtAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type BuildInfo", field.Name)
+}
+
+func (ec *executionContext) childFields_Person(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_Person_id(ctx, field)
+	case "mail":
+		return ec.fieldContext_Person_mail(ctx, field)
+	case "name":
+		return ec.fieldContext_Person_name(ctx, field)
+	case "roles":
+		return ec.fieldContext_Person_roles(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Person", field.Name)
 }
 
 func (ec *executionContext) childFields___Directive(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
