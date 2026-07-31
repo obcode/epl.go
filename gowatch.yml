@@ -8,6 +8,18 @@
 # Hence: build to ./tallox, which .gitignore already covers.
 appname: "tallox"
 
+# The local loop has no auth proxy in front of it, so nothing sets X-Remote-User and every
+# request would be anonymous — `me` returns null and every authenticated field refuses. The
+# server's default is -auth-mode=proxy on purpose (a server that falls back to dev mode when
+# nobody configured it hands out an administrator the day somebody forgets a flag), so the
+# development mode has to be asked for here, in the one place that only ever runs locally.
+#
+# The token door stays real in dev mode: /api/graphql still needs a Personal Access Token
+# from the local database. That asymmetry is the point — the production credential path gets
+# exercised daily instead of discovered in October.
+cmd_args:
+  - "-auth-mode=dev"
+
 vendor_watch: false
 build_pkg: ""
 build_tags: ""

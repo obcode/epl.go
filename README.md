@@ -74,7 +74,9 @@ gowatch                                               # live-reloading server on
 The server needs `TALLOX_DB_URL` and applies the embedded migrations at startup.
 
 Locally `-auth-mode=dev` injects a development user on the browser path, so the GraphQL
-playground at `/` works without a login. That user holds every role; to see what a colleague
+playground at `/` works without a login. `gowatch` passes that flag (see `gowatch.yml`) —
+without it the local server runs in proxy mode, nothing sets `X-Remote-User`, and every
+request is anonymous while the process looks perfectly healthy. That user holds every role; to see what a colleague
 with one role sees, seed a person and send `X-Remote-User` yourself. The **token path stays
 real** even in dev — it needs an actual PAT from the local database, which keeps the
 production code path exercised daily instead of discovered in October.
