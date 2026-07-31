@@ -61,3 +61,17 @@ ON CONFLICT (person_id, role) DO NOTHING;
 -- name: RevokeRole :exec
 DELETE FROM person_role
 WHERE person_id = $1 AND role = $2;
+
+-- name: BootstrapAdmin :one
+-- Creates the first person, and only the first.
+--
+-- The WHERE NOT EXISTS is the whole safety argument: this statement can insert into an empty
+-- table and nothing else. It cannot grant anything to somebody who already exists, so the
+-- flag that calls it cannot be used to escalate an account — the worst it can do on a
+-- populated database is nothing at all.
+--
+-- Returns no row when the table is not empty, which the caller reads as "already bootstrapped".
+INSERT INTO person (id, mail, name)
+SELECT $1, $2, $3
+WHERE NOT EXISTS (SELECT 1 FROM person)
+RETURNING id, mail, name, active, created_at, updated_at;

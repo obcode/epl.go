@@ -11,6 +11,15 @@ import (
 )
 
 type Querier interface {
+	// Creates the first person, and only the first.
+	//
+	// The WHERE NOT EXISTS is the whole safety argument: this statement can insert into an empty
+	// table and nothing else. It cannot grant anything to somebody who already exists, so the
+	// flag that calls it cannot be used to escalate an account — the worst it can do on a
+	// populated database is nothing at all.
+	//
+	// Returns no row when the table is not empty, which the caller reads as "already bootstrapped".
+	BootstrapAdmin(ctx context.Context, arg BootstrapAdminParams) (Person, error)
 	// People and their role grants.
 	//
 	// Every read that resolves an identity returns the roles with it, in one round trip. Two

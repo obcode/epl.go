@@ -119,7 +119,14 @@ The server reads `TALLOX_DB_URL` from the environment and applies the embedded m
 startup. Without a database it refuses to start — it cannot authenticate anybody.
 
 `-migrate-status` reports what is applied and what this binary would apply, then exits without
-touching anything. **Migrations are not undone by a rollback**: pinning an older image tag
+touching anything.
+
+`-bootstrap-admin=<mail>` solves the first-boot deadlock: both doors need a person row, and
+handing out a Personal Access Token is itself something only a signed-in administrator can
+do, so a fresh database is locked from the outside with the key on the inside. The insert
+carries `WHERE NOT EXISTS (SELECT 1 FROM person)`, which is the whole safety argument — on a
+database that has ever had a person in it the flag does nothing, so it cannot promote an
+account on a running installation. **Migrations are not undone by a rollback**: pinning an older image tag
 leaves the newer schema in place, so every migration has to be one the previous image can run
 against — add a column in one release, stop reading the old one in the next, drop it in a
 third.

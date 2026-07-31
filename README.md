@@ -72,6 +72,9 @@ gowatch                                               # live-reloading server on
 ```
 
 The server needs `TALLOX_DB_URL` and applies the embedded migrations at startup.
+`-bootstrap-admin=<mail>` creates the first ADMIN — but only on a database with no person in
+it, so it cannot promote an existing account and does nothing at all on every restart after
+the first.
 
 Locally `-auth-mode=dev` injects a development user on the browser path, so the GraphQL
 playground at `/` works without a login. `gowatch` passes that flag (see `gowatch.yml`) —

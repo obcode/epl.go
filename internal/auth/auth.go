@@ -45,6 +45,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
 	"github.com/obcode/tallox.go/internal/principal"
@@ -204,7 +205,7 @@ func Middleware(a Authenticator) func(http.Handler) http.Handler {
 
 			case err != nil:
 				status, message := refusal(err)
-				log.Debug().
+				log.WithLevel(severity(err)).
 					Err(err).
 					Str("door", a.Door()).
 					Int("status", status).
@@ -215,6 +216,38 @@ func Middleware(a Authenticator) func(http.Handler) http.Handler {
 				next.ServeHTTP(w, r.WithContext(principal.NewContext(r.Context(), actor)))
 			}
 		})
+	}
+}
+
+// severity is how loudly a refusal is logged.
+//
+// The distinction that matters is who caused it and who can act on it.
+//
+// A failing lookup is an Error: nobody's credential is broken, the database is, and that is
+// an operational event somebody has to see. It was the worst of the three to have at Debug —
+// an outage that leaves no trace in the log at all.
+//
+// A refusal that names a real account or a real token — unknown identity, deactivated person,
+// expired or revoked token — is Info. Those are the lines somebody greps for when a colleague
+// says "it stopped working", and there is one per human event rather than one per request.
+// Production runs at Info, so this is the level at which a wave of 401s is visible at all.
+//
+// A malformed or invalid token stays at Debug. Not because it is uninteresting, but because
+// its volume is chosen by whoever is sending it: anybody who can reach the token door can
+// produce these at any rate they like, and a log that can be flooded from outside is a log
+// that gets ignored — or fills a disk. The owner of a real token that stopped working lands
+// in one of the Info cases above.
+func severity(err error) zerolog.Level {
+	switch {
+	case errors.Is(err, ErrUnavailable):
+		return zerolog.ErrorLevel
+	case errors.Is(err, ErrUnknownUser),
+		errors.Is(err, ErrInactiveUser),
+		errors.Is(err, ErrExpiredToken),
+		errors.Is(err, ErrRevokedToken):
+		return zerolog.InfoLevel
+	default:
+		return zerolog.DebugLevel
 	}
 }
 
