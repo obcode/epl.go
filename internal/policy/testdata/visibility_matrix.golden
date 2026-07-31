@@ -1,0 +1,143 @@
+Wunsch-Sichtbarkeit — wer sieht welchen Wunsch, wann
+===================================================
+
+Erzeugt aus internal/policy (TestVisibilityMatrix). Nicht von Hand ändern:
+
+    go test ./internal/policy/ -update-golden
+
+Die Regel
+---------
+
+Ein Wunsch ist sichtbar genau dann, wenn
+
+  · er der anfragenden Person selbst gehört, oder
+  · die Wünsche des Semesters veröffentlicht sind
+    (semester.wishes_published_at IS NOT NULL), oder
+  · die Person plant (Fachgruppen- oder Studiengangsleitung) bzw. zum Dekanat gehört —
+    und dann nur in einer interaktiven Sitzung, nicht über ein Personal Access Token.
+
+Zweck: kein Windhundverfahren. Neue Kolleg:innen sollen sich eintragen können, ohne dass es
+wie ein Angriff auf eine alteingesessene Person wirkt.
+
+Die Spalten
+-----------
+
+  eigener / fremder   Sieht diese Person ihren eigenen bzw. einen fremden Wunsch?
+  Filter              Dieselbe Regel als Query-Einschränkung. **Zählungen laufen durch
+                      genau diesen Filter** — sonst verrät „3 Kolleg:innen haben bereits
+                      Interesse" die Information vollständig, ohne einen Namen zu nennen.
+
+Anmerkungen
+-----------
+
+  · Die Phase steht in jeder Zeile und ändert die Antwort nie. Veröffentlicht wird über einen
+    eigenen Zeitstempel, nicht über die Phase: die Wunschphase kann enden, ohne dass
+    veröffentlicht wird, und veröffentlicht werden, während die Zuteilung läuft.
+  · Mehrfachrollen sind nicht aufgeführt. Wer mehrere Rollen hält, sieht die Vereinigung —
+    geprüft über das vollständige Kreuzprodukt in TestGuardAndFilterAgree.
+  · ADMIN ist bewusst kein Wunsch-Leser. Das System zu betreiben ist eine andere Aufgabe als
+    damit zu planen; wer wirklich hineinsehen muss, bekommt sichtbar die Rolle DEKANAT.
+  · Über ein Personal Access Token sieht auch eine planende Person nur die eigenen Wünsche,
+    solange nicht veröffentlicht ist. Ein langlebiges Token in einem Skript ermöglicht
+    stillen Massenexport und entkoppelt „wer hat das gesehen" von einem Login-Ereignis.
+
+Rolle               Tür        Phase           Wünsche           eigener  fremder  Filter
+-----------------------------------------------------------------------------------------
+(nicht angemeldet)  —          BEDARFSPLANUNG  unveröffentlicht  nein     nein     kein Zugriff
+(nicht angemeldet)  —          WUNSCHPHASE     unveröffentlicht  nein     nein     kein Zugriff
+(nicht angemeldet)  —          ZUTEILUNG       unveröffentlicht  nein     nein     kein Zugriff
+(nicht angemeldet)  —          FINAL           unveröffentlicht  nein     nein     kein Zugriff
+(nicht angemeldet)  —          BEDARFSPLANUNG  veröffentlicht    nein     nein     kein Zugriff
+(nicht angemeldet)  —          WUNSCHPHASE     veröffentlicht    nein     nein     kein Zugriff
+(nicht angemeldet)  —          ZUTEILUNG       veröffentlicht    nein     nein     kein Zugriff
+(nicht angemeldet)  —          FINAL           veröffentlicht    nein     nein     kein Zugriff
+
+DOZENT              interaktiv BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+DOZENT              interaktiv WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+DOZENT              interaktiv ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+DOZENT              interaktiv FINAL           unveröffentlicht  ja       nein     nur eigene
+DOZENT              interaktiv BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+DOZENT              interaktiv WUNSCHPHASE     veröffentlicht    ja       ja       alle
+DOZENT              interaktiv ZUTEILUNG       veröffentlicht    ja       ja       alle
+DOZENT              interaktiv FINAL           veröffentlicht    ja       ja       alle
+
+DOZENT              Token      BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+DOZENT              Token      WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+DOZENT              Token      ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+DOZENT              Token      FINAL           unveröffentlicht  ja       nein     nur eigene
+DOZENT              Token      BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+DOZENT              Token      WUNSCHPHASE     veröffentlicht    ja       ja       alle
+DOZENT              Token      ZUTEILUNG       veröffentlicht    ja       ja       alle
+DOZENT              Token      FINAL           veröffentlicht    ja       ja       alle
+
+FACHGRUPPENLEITUNG  interaktiv BEDARFSPLANUNG  unveröffentlicht  ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv WUNSCHPHASE     unveröffentlicht  ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv ZUTEILUNG       unveröffentlicht  ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv FINAL           unveröffentlicht  ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv WUNSCHPHASE     veröffentlicht    ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv ZUTEILUNG       veröffentlicht    ja       ja       alle
+FACHGRUPPENLEITUNG  interaktiv FINAL           veröffentlicht    ja       ja       alle
+
+FACHGRUPPENLEITUNG  Token      BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+FACHGRUPPENLEITUNG  Token      WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+FACHGRUPPENLEITUNG  Token      ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+FACHGRUPPENLEITUNG  Token      FINAL           unveröffentlicht  ja       nein     nur eigene
+FACHGRUPPENLEITUNG  Token      BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+FACHGRUPPENLEITUNG  Token      WUNSCHPHASE     veröffentlicht    ja       ja       alle
+FACHGRUPPENLEITUNG  Token      ZUTEILUNG       veröffentlicht    ja       ja       alle
+FACHGRUPPENLEITUNG  Token      FINAL           veröffentlicht    ja       ja       alle
+
+STUDIENGANGSLEITUNG interaktiv BEDARFSPLANUNG  unveröffentlicht  ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv WUNSCHPHASE     unveröffentlicht  ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv ZUTEILUNG       unveröffentlicht  ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv FINAL           unveröffentlicht  ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv WUNSCHPHASE     veröffentlicht    ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv ZUTEILUNG       veröffentlicht    ja       ja       alle
+STUDIENGANGSLEITUNG interaktiv FINAL           veröffentlicht    ja       ja       alle
+
+STUDIENGANGSLEITUNG Token      BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+STUDIENGANGSLEITUNG Token      WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+STUDIENGANGSLEITUNG Token      ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+STUDIENGANGSLEITUNG Token      FINAL           unveröffentlicht  ja       nein     nur eigene
+STUDIENGANGSLEITUNG Token      BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+STUDIENGANGSLEITUNG Token      WUNSCHPHASE     veröffentlicht    ja       ja       alle
+STUDIENGANGSLEITUNG Token      ZUTEILUNG       veröffentlicht    ja       ja       alle
+STUDIENGANGSLEITUNG Token      FINAL           veröffentlicht    ja       ja       alle
+
+DEKANAT             interaktiv BEDARFSPLANUNG  unveröffentlicht  ja       ja       alle
+DEKANAT             interaktiv WUNSCHPHASE     unveröffentlicht  ja       ja       alle
+DEKANAT             interaktiv ZUTEILUNG       unveröffentlicht  ja       ja       alle
+DEKANAT             interaktiv FINAL           unveröffentlicht  ja       ja       alle
+DEKANAT             interaktiv BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+DEKANAT             interaktiv WUNSCHPHASE     veröffentlicht    ja       ja       alle
+DEKANAT             interaktiv ZUTEILUNG       veröffentlicht    ja       ja       alle
+DEKANAT             interaktiv FINAL           veröffentlicht    ja       ja       alle
+
+DEKANAT             Token      BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+DEKANAT             Token      WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+DEKANAT             Token      ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+DEKANAT             Token      FINAL           unveröffentlicht  ja       nein     nur eigene
+DEKANAT             Token      BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+DEKANAT             Token      WUNSCHPHASE     veröffentlicht    ja       ja       alle
+DEKANAT             Token      ZUTEILUNG       veröffentlicht    ja       ja       alle
+DEKANAT             Token      FINAL           veröffentlicht    ja       ja       alle
+
+ADMIN               interaktiv BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+ADMIN               interaktiv WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+ADMIN               interaktiv ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+ADMIN               interaktiv FINAL           unveröffentlicht  ja       nein     nur eigene
+ADMIN               interaktiv BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+ADMIN               interaktiv WUNSCHPHASE     veröffentlicht    ja       ja       alle
+ADMIN               interaktiv ZUTEILUNG       veröffentlicht    ja       ja       alle
+ADMIN               interaktiv FINAL           veröffentlicht    ja       ja       alle
+
+ADMIN               Token      BEDARFSPLANUNG  unveröffentlicht  ja       nein     nur eigene
+ADMIN               Token      WUNSCHPHASE     unveröffentlicht  ja       nein     nur eigene
+ADMIN               Token      ZUTEILUNG       unveröffentlicht  ja       nein     nur eigene
+ADMIN               Token      FINAL           unveröffentlicht  ja       nein     nur eigene
+ADMIN               Token      BEDARFSPLANUNG  veröffentlicht    ja       ja       alle
+ADMIN               Token      WUNSCHPHASE     veröffentlicht    ja       ja       alle
+ADMIN               Token      ZUTEILUNG       veröffentlicht    ja       ja       alle
+ADMIN               Token      FINAL           veröffentlicht    ja       ja       alle
