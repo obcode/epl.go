@@ -1,0 +1,54 @@
+"""
+A role grant.
+
+Roles are not a ladder. A person holds a set of them — the same colleague may lead a subject
+group and a study programme — so every rule asks about the set rather than about "the" role.
+
+The values are English; the GUI renders the German terms the faculty uses (Dozent:in,
+Fachgruppenleitung, Studiengangsleitung, Dekanat).
+"""
+enum Role {
+  "Teaches, maintains a profile and a competence profile, registers interest in instances."
+  LECTURER
+  "Assigns the instances of one subject group."
+  SUBJECT_GROUP_LEAD
+  "Declares the demand of one study programme: which instances are needed, and the catalogues."
+  PROGRAMME_LEAD
+  "Reads across programmes for the import/export statistics, maintains the teaching-load traffic light."
+  DEANS_OFFICE
+  "Administers users, roles and tokens. Deliberately not a reader of unpublished wishes."
+  ADMIN
+}
+
+"""
+A person in the planning.
+
+Deliberately lean. Personnel data — the teaching-load/overtime traffic light, free-text notes —
+does not hang off this type and never will: it lives in root fields of its own, so that there
+is no traversal path to it in the first place and the `@interactiveOnly` directive is a second
+line of defence rather than the only one.
+"""
+type Person {
+  id: ID!
+  "The identity the auth proxy asserts, and the natural key of a person."
+  mail: String!
+  name: String!
+  "The grants this person holds, in a stable order."
+  roles: [Role!]!
+}
+
+extend type Query {
+  """
+  The authenticated caller, or `null` when there is none.
+
+  `null` rather than an error, because "nobody is logged in" is a normal state that the GUI
+  renders (the login page) rather than an exception it has to catch. It is also the smallest
+  honest answer to "did my credential work": a script that gets a person back knows its token
+  is valid, its owner is active, and which roles it will be judged by — through exactly the
+  same field the browser uses.
+
+  NOTE: once the `@scope` directive lands this field needs an explicit
+  `@scope(area: PROFILE, verb: READ)`, like every other root field.
+  """
+  me: Person
+}

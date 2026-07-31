@@ -6,47 +6,14 @@ import (
 	"testing"
 
 	"github.com/obcode/tallox.go/bootstrap"
+	"github.com/obcode/tallox.go/internal/auth"
 	"github.com/obcode/tallox.go/internal/buildinfo"
 	"github.com/obcode/tallox.go/internal/graphqltest"
-	"github.com/obcode/tallox.go/internal/testdata"
 )
 
-// TestBothDoorsServeTheSameSchema is the test that keeps "two doors, one authorization
-// model" honest at the routing level.
-//
-// The realistic way this design fails is not a wrong answer but a second handler: someone
-// needs a tweak on the token path, mounts a separately constructed server there, and from
-// that moment every rule has to be added twice. Asserting that both mounts answer the same
-// query with the same payload makes that divergence a failing test rather than a discovery
-// during an audit.
-//
-// Written through graphqltest.EachDoor rather than by hand, because that is the shape every
-// future rule test should have — and a harness nobody uses in the repository's own tests is
-// a harness that will not work when someone finally reaches for it.
-func TestBothDoorsServeTheSameSchema(t *testing.T) {
-	t.Parallel()
-
-	build := buildinfo.Info{
-		Version: "1.2.3",
-		Commit:  "0123456",
-		BuiltAt: "2026-07-31T09:00:00Z",
-	}
-	h := bootstrap.Handler(build, false)
-
-	const query = `{ buildInfo { version commit builtAt } }`
-
-	graphqltest.EachDoor(t, h, testdata.Eins.Mail, testdata.Eins.Token,
-		func(t *testing.T, c *graphqltest.Client) {
-			var got struct {
-				BuildInfo buildinfo.Info `json:"buildInfo"`
-			}
-			c.MustQuery(t, query, nil, &got)
-
-			if got.BuildInfo != build {
-				t.Errorf("%s door returned %+v, want %+v", c.Door().Name, got.BuildInfo, build)
-			}
-		})
-}
+// The tests in this file need no database: they are about the routes that answer before
+// anybody has authenticated, and about which routes exist at all. Everything that requires a
+// real identity lives in auth_test.go, against real PostgreSQL.
 
 // TestBuildInfoAnswersWithoutCredentials pins a deliberate exception rather than an oversight.
 //
@@ -57,7 +24,10 @@ func TestBothDoorsServeTheSameSchema(t *testing.T) {
 func TestBuildInfoAnswersWithoutCredentials(t *testing.T) {
 	t.Parallel()
 
-	h := bootstrap.Handler(buildinfo.Info{Version: "dev"}, false)
+	h := bootstrap.Handler(bootstrap.Options{
+		Build: buildinfo.Info{Version: "dev"},
+		Auth:  auth.Config{Mode: auth.ModeProxy},
+	})
 
 	for _, door := range []graphqltest.Door{graphqltest.Browser, graphqltest.Token} {
 		t.Run(door.Name, func(t *testing.T) {
@@ -79,6 +49,72 @@ func TestBuildInfoAnswersWithoutCredentials(t *testing.T) {
 	}
 }
 
+// TestMeIsNullWithoutASession is the other half of that exception, and the reason the
+// middleware lets an unauthenticated request through instead of refusing it.
+//
+// Callers without a session get null rather than an error, because "nobody is logged in" is a
+// state the GUI renders. What must never happen is a person coming back.
+func TestMeIsNullWithoutASession(t *testing.T) {
+	t.Parallel()
+
+	h := bootstrap.Handler(bootstrap.Options{
+		Build: buildinfo.Info{Version: "dev"},
+		Auth:  auth.Config{Mode: auth.ModeProxy},
+	})
+
+	for _, door := range []graphqltest.Door{graphqltest.Browser, graphqltest.Token} {
+		t.Run(door.Name, func(t *testing.T) {
+			t.Parallel()
+
+			var got struct {
+				Me *struct {
+					Mail string `json:"mail"`
+				} `json:"me"`
+			}
+			graphqltest.New(h).On(door).Anonymous().
+				MustQuery(t, `{ me { mail } }`, nil, &got)
+
+			if got.Me != nil {
+				t.Errorf("an anonymous caller is %q", got.Me.Mail)
+			}
+		})
+	}
+}
+
+// TestOffTokenModeRemovesTheMachineDoor covers the emergency stop.
+//
+// A 404 rather than a 401: the route is not mounted, so no code path is left that could be
+// wrong about whether the stop is engaged. Switching a surface off by omission rather than by
+// a guard is what makes it trustworthy at three in the morning.
+func TestOffTokenModeRemovesTheMachineDoor(t *testing.T) {
+	t.Parallel()
+
+	h := bootstrap.Handler(bootstrap.Options{
+		Build: buildinfo.Info{Version: "dev"},
+		Auth:  auth.Config{Mode: auth.ModeOffToken},
+	})
+
+	req := httptest.NewRequest(http.MethodPost, "/api/graphql", nil)
+	rec := httptest.NewRecorder()
+	h.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("POST /api/graphql answered %d in off-token mode, want 404: %s",
+			rec.Code, rec.Body)
+	}
+
+	// The stop closes one door, not the building.
+	var got struct {
+		BuildInfo struct {
+			Version string `json:"version"`
+		} `json:"buildInfo"`
+	}
+	graphqltest.New(h).Anonymous().MustQuery(t, `{ buildInfo { version } }`, nil, &got)
+	if got.BuildInfo.Version != "dev" {
+		t.Error("the browser door stopped working in off-token mode")
+	}
+}
+
 // TestPlaygroundIsOptional guards the flag rather than the page: the playground is the only
 // route that answers on "/", so a default flip would silently expose it wherever "/" is
 // routed to this container.
@@ -94,7 +130,7 @@ func TestPlaygroundIsOptional(t *testing.T) {
 	} {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		rec := httptest.NewRecorder()
-		bootstrap.Handler(buildinfo.Info{}, tc.enabled).ServeHTTP(rec, req)
+		bootstrap.Handler(bootstrap.Options{Playground: tc.enabled}).ServeHTTP(rec, req)
 
 		if rec.Code != tc.want {
 			t.Errorf("playground=%v: GET / returned %d, want %d", tc.enabled, rec.Code, tc.want)
@@ -111,7 +147,8 @@ func TestHealthzNeedsNothing(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/healthz", nil)
 	rec := httptest.NewRecorder()
-	bootstrap.Handler(buildinfo.Info{Version: "1.2.3"}, false).ServeHTTP(rec, req)
+	bootstrap.Handler(bootstrap.Options{Build: buildinfo.Info{Version: "1.2.3"}}).
+		ServeHTTP(rec, req)
 
 	if rec.Code != http.StatusOK {
 		t.Fatalf("GET /healthz returned %d, want 200: %s", rec.Code, rec.Body.String())

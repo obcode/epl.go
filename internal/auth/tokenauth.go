@@ -55,9 +55,13 @@ func (*TokenAuthenticator) Door() string { return "token" }
 
 // Wait blocks until the pending last-used writes have finished.
 //
-// For graceful shutdown, and for tests: without it, a goroutine writing to a pool that
-// t.Cleanup is closing produces an error log from a test that has already passed, which is
-// the kind of noise that trains people to ignore logs.
+// For tests. Without it, a goroutine writing to a pool that t.Cleanup is about to close
+// produces an error log — and worse, a data race the -race detector reports — from a test
+// that has already passed.
+//
+// Shutdown deliberately does not call it: last_used_at is bookkeeping, and delaying a
+// restart to persist "this token was used a moment ago" would trade something that matters
+// for something that does not.
 func (a *TokenAuthenticator) Wait() { a.inflight.Wait() }
 
 // Authenticate verifies a bearer token and returns its owner as an actor.

@@ -8,6 +8,10 @@ import (
 
 	"github.com/pressly/goose/v3"
 
+	// Registers the "pgx" database/sql driver, which is how goose reaches the same database
+	// the pool is bound to.
+	_ "github.com/jackc/pgx/v5/stdlib"
+
 	"github.com/obcode/tallox.go/db"
 )
 
@@ -47,6 +51,33 @@ func Migrate(ctx context.Context, sqlDB *sql.DB) (int, error) {
 		return 0, fmt.Errorf("cannot apply migrations: %w", err)
 	}
 	return len(results), nil
+}
+
+// MigrateUpDSN opens its own connection, applies every pending migration and closes again.
+//
+// It exists so that the server can migrate at startup without bootstrap importing
+// database/sql — which the architecture test confines to this package, and rightly: the
+// moment another package holds a sql.DB, it can also run a query, and the visibility policy
+// stops being unavoidable.
+//
+// A separate connection rather than the pgxpool the server runs on, because goose speaks
+// database/sql and because a migration should not be holding a pooled connection that request
+// handling is waiting for.
+func MigrateUpDSN(ctx context.Context, dsn string) (int, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return 0, fmt.Errorf("cannot open a migration connection: %w", err)
+	}
+	defer func() { _ = db.Close() }()
+
+	// goose runs one statement after another; a second connection would only add the question
+	// of which session a statement landed in.
+	db.SetMaxOpenConns(1)
+
+	if err := db.PingContext(ctx); err != nil {
+		return 0, fmt.Errorf("cannot reach the database for migrations: %w", err)
+	}
+	return Migrate(ctx, db)
 }
 
 // MigrateDown rolls back every applied migration, down to an empty schema.
