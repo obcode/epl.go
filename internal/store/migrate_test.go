@@ -28,12 +28,16 @@ func TestMigrationsApplyFromNothing(t *testing.T) {
 		t.Fatal("no migrations were applied — db/migrations is empty or was not embedded")
 	}
 
-	pending, err := store.PendingMigrations(t.Context(), s.DB)
+	status, err := store.StatusDSN(t.Context(), s.DSN)
 	if err != nil {
 		t.Fatalf("cannot read migration status: %v", err)
 	}
-	if len(pending) != 0 {
-		t.Errorf("after a full migration run %d are still pending: %v", len(pending), pending)
+	if len(status.Pending) != 0 {
+		t.Errorf("after a full migration run %d are still pending: %v",
+			len(status.Pending), status.Pending)
+	}
+	if len(status.Applied) != applied {
+		t.Errorf("status reports %d applied, the run applied %d", len(status.Applied), applied)
 	}
 }
 
@@ -116,12 +120,15 @@ func TestMigrationsAreReversible(t *testing.T) {
 		t.Fatalf("cannot roll back: %v", err)
 	}
 
-	pending, err := store.PendingMigrations(t.Context(), s.DB)
+	status, err := store.Status(t.Context(), s.DB)
 	if err != nil {
 		t.Fatalf("cannot read migration status after rollback: %v", err)
 	}
-	if len(pending) == 0 {
+	if len(status.Pending) == 0 {
 		t.Fatal("after rolling everything back nothing is pending — Down did not undo Up")
+	}
+	if len(status.Applied) != 0 {
+		t.Errorf("after rolling everything back %v are still applied", status.Applied)
 	}
 
 	if _, err := store.Migrate(t.Context(), s.DB); err != nil {

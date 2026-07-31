@@ -44,6 +44,7 @@ golangci-lint-v2 run               # note the -v2 binary name
 go generate ./...                  # gqlgen, after editing graph/*.graphqls
 sqlc generate                      # after editing db/queries/*.sql
 goose -dir db/migrations postgres "$TALLOX_DB_URL" up
+go run . -migrate-status              # what is applied, what this binary would apply
 ```
 
 Pre-commit hooks run gofmt, go vet, golangci-lint-v2 and gitleaks. Run `pre-commit install`
@@ -112,6 +113,12 @@ that removes the route leaves no code path that could be wrong about whether it 
 
 The server reads `TALLOX_DB_URL` from the environment and applies the embedded migrations at
 startup. Without a database it refuses to start — it cannot authenticate anybody.
+
+`-migrate-status` reports what is applied and what this binary would apply, then exits without
+touching anything. **Migrations are not undone by a rollback**: pinning an older image tag
+leaves the newer schema in place, so every migration has to be one the previous image can run
+against — add a column in one release, stop reading the old one in the next, drop it in a
+third.
 
 ### Scopes
 

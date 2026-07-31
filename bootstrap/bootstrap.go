@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"errors"
 	"flag"
+	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
@@ -66,6 +67,12 @@ func Serve(build buildinfo.Info) {
 			"how to authenticate: dev | proxy | off-token")
 		devUser = flag.String("auth-dev-user", auth.DefaultDevUser,
 			"mail address of the injected development user (auth-mode=dev only)")
+		// Read-only, and it exits instead of serving. The question it answers — "what happens
+		// to the schema if I start this image" — is asked while standing in front of a
+		// production database, which is exactly when a command must not be able to change the
+		// answer it is reporting.
+		migrateStatus = flag.Bool("migrate-status", false,
+			"report which migrations are applied and pending, then exit")
 	)
 	flag.Parse()
 
@@ -76,11 +83,6 @@ func Serve(build buildinfo.Info) {
 		Str("builtAt", build.BuiltAt).
 		Msg("tallox starting")
 
-	mode, err := auth.ParseMode(*authMode)
-	if err != nil {
-		log.Fatal().Err(err).Msg("cannot start")
-	}
-
 	dsn := os.Getenv(EnvDatabaseURL)
 	if dsn == "" {
 		log.Fatal().Str("variable", EnvDatabaseURL).
@@ -88,6 +90,19 @@ func Serve(build buildinfo.Info) {
 	}
 
 	ctx := context.Background()
+
+	// Before anything else, and before the auth mode is even validated: this path talks to
+	// the database and exits, so a wrong -auth-mode is not a reason to refuse to answer a
+	// question about the schema.
+	if *migrateStatus {
+		reportMigrationStatus(ctx, dsn)
+		return
+	}
+
+	mode, err := auth.ParseMode(*authMode)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot start")
+	}
 
 	// Migrate before opening the pool that serves requests. Embedded migrations plus "apply at
 	// startup" means a container that has the binary has the schema, by construction: there is
@@ -138,6 +153,21 @@ func Serve(build buildinfo.Info) {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("cannot shut down cleanly")
 	}
+}
+
+// reportMigrationStatus prints what the database has and what this binary is carrying, then
+// returns so that Serve can exit.
+//
+// Written to stdout rather than through zerolog: this is output somebody reads in a terminal
+// after `docker compose exec`, and a log line with a timestamp, a level and a caller in front
+// of it is harder to read for no gain. Failures still go through the logger, because a
+// failure here is an operational event.
+func reportMigrationStatus(ctx context.Context, dsn string) {
+	status, err := store.StatusDSN(ctx, dsn)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot read the migration status")
+	}
+	fmt.Println(status)
 }
 
 // Handler builds the same http.Handler that Serve mounts, without listening on a port.
