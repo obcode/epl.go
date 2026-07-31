@@ -21,6 +21,30 @@ jobs:
           version: latest
           args: --timeout=10m
 
+  # Everything a generator owns has to be reproducible from the sources in the commit.
+  #
+  # The failure this prevents is specific and quiet: someone edits graph/*.graphqls, implements
+  # the resolver by hand and forgets `go generate`. The build stays green because the generated
+  # code still compiles — it just no longer matches the schema, and `pnpm run update-schema`
+  # in tallox.gui then pulls a schema describing a server that does not exist.
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - run: go generate ./...
+      - run: go mod tidy
+      - name: generated code is up to date
+        run: |
+          if ! git diff --exit-code; then
+            echo "::error::Generated files differ from the committed ones."
+            echo "Run 'go generate ./... && go mod tidy' and commit the result."
+            exit 1
+          fi
+
+  # The fast path: one PostgreSQL service for the whole job, one schema per test.
   test:
     runs-on: ubuntu-latest
     services:
@@ -39,6 +63,9 @@ jobs:
           --health-retries 10
     env:
       TALLOX_TEST_DB_URL: postgres://tallox:tallox@127.0.0.1:5432/tallox_test?sslmode=disable
+      # Pin the source. Without this the harness would silently fall back to Testcontainers
+      # when the service is unhealthy, and this job would stop testing what it is named after.
+      TALLOX_TEST_DB: env
       # Ohne das würden Integrationstests bei einem DB-Problem still übersprungen — "grün"
       # und "nie gelaufen" sähen dann gleich aus.
       TALLOX_TEST_DB_REQUIRED: "1"
@@ -48,10 +75,57 @@ jobs:
         with:
           go-version-file: go.mod
       - run: go build ./...
-      - run: go test -race -v ./...
+      - run: go vet ./...
+      # -shuffle=on because schema-per-test is what makes the suite order-independent, and a
+      # fixed order is how that property quietly stops holding.
+      - name: test
+        run: go test -race -shuffle=on -coverprofile=coverage.out -covermode=atomic ./...
+      - name: coverage summary
+        run: go tool cover -func=coverage.out | tail -30
+      - uses: actions/upload-artifact@v5
+        if: always()
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 14
+
+  # The same integration tests, against a database created from nothing.
+  #
+  # Not redundant with `test`. The DevContainer's database has been migrated incrementally
+  # since the day it was created, and so has production's volume — both will happily run a
+  # migration that only works because of something an earlier, since-edited migration left
+  # behind. A Testcontainers instance has no history at all, which is the position a new
+  # production volume starts from.
+  #
+  # It also keeps the Testcontainers path itself alive. Nobody runs it locally (the DevContainer
+  # has no Docker socket), so without this job it would rot until the day someone needs it.
+  test-from-scratch:
+    runs-on: ubuntu-latest
+    env:
+      TALLOX_TEST_DB: container
+      TALLOX_TEST_DB_REQUIRED: "1"
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      # Only the packages that touch the database. The rest gains nothing from a container and
+      # would just pay for it in wall-clock time.
+      - name: integration tests on a throwaway PostgreSQL
+        run: go test -count=1 -v ./internal/store/...
+
+  vulncheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v7
+        with:
+          go-version-file: go.mod
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
   release:
-    needs: [lint, test]
+    needs: [lint, generate, test, test-from-scratch]
     # Feature-Gate wie beim Deploy: erst auf true stellen, wenn das Secret RELEASE_TOKEN
     # angelegt ist. secrets lassen sich in einem job-level `if` nicht auswerten, deshalb
     # eine Repo-Variable. Bis dahin bleibt die Pipeline grün, statt bei jedem Push an einer

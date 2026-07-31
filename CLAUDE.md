@@ -29,6 +29,9 @@ not anonymised-real.
 go build ./...
 go test ./...                      # integration tests need $TALLOX_TEST_DB_URL
 go test ./internal/policy/ -run TestVisibilityMatrix
+go test ./internal/policy/ -update-golden   # re-record the matrix, then READ the diff
+go test -race -shuffle=on ./...    # what CI runs
+TALLOX_TEST_DB=container go test ./internal/store/...   # needs a Docker socket
 go vet ./...
 golangci-lint-v2 run               # note the -v2 binary name
 go generate ./...                  # gqlgen, after editing graph/*.graphqls
@@ -52,9 +55,13 @@ internal/auth/             two authenticators, one middleware
 internal/policy/           visibility and phase rules. Pure: no DB, no HTTP, no GraphQL.
 internal/domain/           business logic
 internal/store/            the ONLY owner of pgxpool. sqlc-generated queries.
+internal/store/storetest/  integration harness: a migrated schema per test
+db/                        embedded SQL assets (db.Migrations)
 db/migrations/*.sql        goose
 db/queries/*.sql           sqlc
-internal/testdata/         invented fixtures
+internal/testdata/         invented fixtures — the cast of personas
+internal/graphqltest/      drives the real handler through both doors
+internal/golden/           committed renderings, `-update-golden` to re-record
 ```
 
 **Enforced by a CI test: no package outside `internal/store` imports `pgx`/`pgxpool`.**
@@ -181,3 +188,48 @@ disabled in production.
 - **Migrations:** goose, embedded, applied at startup. Steps must be idempotent; never edit
   or reorder a released migration.
 - Version is injected via ldflags into `main.version/commit/date`.
+
+## Testing
+
+No step, feature or fix is finished without tests. The rules this system has to get right are
+the kind whose violation is a political problem rather than a bug report, so a regression has
+to turn CI red before anyone notices it in the GUI.
+
+**The harnesses, and what each is for**
+
+| Package | Use it for |
+| --- | --- |
+| `internal/store/storetest` | A real, migrated PostgreSQL schema per test. `storetest.New(t)`. |
+| `internal/graphqltest` | Driving the real handler as a principal, through one or both doors. |
+| `internal/testdata` | The cast: `Eins` owns the record, `Zwei` must not see it, `Vier` plans. |
+| `internal/golden` | Rendering a whole rule as a reviewable file. |
+
+`storetest.New(t)` creates a schema, migrates it, drops it in `t.Cleanup` — so tests may call
+`t.Parallel()`, and a crashed run leaves nothing behind. It takes the database from
+`$TALLOX_TEST_DB_URL` when that is reachable and otherwise starts one via **Testcontainers**;
+`$TALLOX_TEST_DB` (`auto` | `env` | `container`) pins the choice. The DevContainer has no
+Docker socket, so the container path only runs in CI — which is exactly why CI runs it, in a
+job of its own, against a database with no history.
+
+**Do not mock the database.** The wish filter is a `WHERE` clause, "no aggregates before
+publication" is what `COUNT` does with that clause, and the generic write-path error exists
+because PostgreSQL raises SQLSTATE 23505. A fake store passes all three while the shipped
+query leaks.
+
+**Every rule gets tested through both doors.** `graphqltest.EachDoor` runs the assertion once
+per mount for the same principal. The realistic failure is not a wrong answer — it is a rule
+someone adds for the browser and forgets on the token path. Where the doors are *supposed* to
+differ (`@interactiveOnly`), assert per door explicitly rather than quietly covering one.
+
+**Test the leak channels, not just the rows.** For any visibility rule, that means a case for
+the count as well as the list, and `graphqltest.AssertNoLeak(t, msg, append(graphqltest.DatabaseNoise(), testdata.Mails(testdata.Others(owner))...)...)`
+on the write path.
+
+**Migrations are tested in three directions** (`internal/store/migrate_test.go`): they apply
+from nothing, applying twice is a no-op, and Down undoes Up. The rollback path is only ever
+exercised on the day it is needed, unless CI exercises it on a Tuesday.
+
+**CI gate** (`.github/workflows/ci.yml`): lint · generated-code drift · `go test -race
+-shuffle=on` with coverage · the same integration tests on a from-scratch Testcontainers
+database · govulncheck. End-to-end lives in `tallox.gui`, where the auth proxy exists to be
+tested.

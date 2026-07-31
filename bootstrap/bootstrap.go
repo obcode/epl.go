@@ -73,6 +73,17 @@ func Serve(build buildinfo.Info) {
 	}
 }
 
+// Handler builds the same http.Handler that Serve mounts, without listening on a port.
+//
+// Exported for tests, and deliberately the *same* function Serve uses rather than a
+// test-only reassembly of the routes. A harness that wires its own router proves that the
+// harness is correct; this one proves that the server is. Every rule that lands in the
+// middleware chain is therefore exercised by the integration tests automatically, including
+// the ones nobody remembered to write a test for.
+func Handler(build buildinfo.Info, playgroundEnabled bool) http.Handler {
+	return router(build, playgroundEnabled)
+}
+
 func router(build buildinfo.Info, playgroundEnabled bool) http.Handler {
 	r := chi.NewRouter()
 

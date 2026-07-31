@@ -13,7 +13,7 @@ import (
 )
 
 // BuildInfo is the resolver for the buildInfo field.
-func (r *queryResolver) BuildInfo(_ context.Context) (*buildinfo.Info, error) {
+func (r *queryResolver) BuildInfo(ctx context.Context) (*buildinfo.Info, error) {
 	return &r.Build, nil
 }
 
