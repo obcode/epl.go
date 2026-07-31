@@ -1,9 +1,10 @@
-# Build output. Das Binary muss `tallox` heißen, nicht `tallox.go` — sonst kompiliert
-# der nächste Build das eigene Binary als Quelldatei mit. Erzwungen in `gowatch.yml`.
+# Build output. The binary has to be called `tallox`, not `tallox.go` — otherwise the
+# next build feeds its own binary to the compiler as a source file. Enforced in
+# `gowatch.yml`.
 /tallox
 /dist/
 
-# Konfiguration mit Secrets. Nur lokal bzw. auf dem Host.
+# Configuration holding secrets. Local machine and host only.
 tallox.yaml
 .env
 

@@ -38,15 +38,15 @@ jobs:
 
   dispatch-deploy:
     needs: build-and-push
-    # Feature-Gate wie beim Release und beim Deploy: ohne DISPATCH_TOKEN bricht `gh api` mit
-    # leerem GH_TOKEN ab und färbt den Release-Lauf rot. Zusammen mit AUTO_DEPLOY in
-    # tallox.dev scharfschalten, sobald der Host steht.
+    # A feature gate, as for the release and the deploy: without DISPATCH_TOKEN, `gh api`
+    # aborts on an empty GH_TOKEN and turns the release run red. Arm it together with
+    # AUTO_DEPLOY in tallox.dev once the host exists.
     if: ${{ vars.DEPLOY_DISPATCH_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     steps:
-      # Die Deploy-Artefakte liegen im privaten Repo tallox.dev. Statt sie hier zu spiegeln,
-      # löst der Release dort einen Workflow aus. DISPATCH_TOKEN ist ein fine-grained PAT
-      # mit ausschließlich "contents: write" auf obcode/tallox.dev.
+      # The deploy artefacts live in the private tallox.dev repository. Rather than
+      # mirroring them here, the release triggers a workflow there. DISPATCH_TOKEN is a
+      # fine-grained PAT with nothing but "contents: write" on obcode/tallox.dev.
       - name: Deploy in tallox.dev auslösen
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}

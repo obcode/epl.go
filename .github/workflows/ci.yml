@@ -66,8 +66,8 @@ jobs:
       # Pin the source. Without this the harness would silently fall back to Testcontainers
       # when the service is unhealthy, and this job would stop testing what it is named after.
       TALLOX_TEST_DB: env
-      # Ohne das würden Integrationstests bei einem DB-Problem still übersprungen — "grün"
-      # und "nie gelaufen" sähen dann gleich aus.
+      # Without this, a database problem would silently skip the integration tests, and
+      # "green" would look exactly like "never ran".
       TALLOX_TEST_DB_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v7
@@ -124,14 +124,14 @@ jobs:
       - name: govulncheck
         run: go run golang.org/x/vuln/cmd/govulncheck@latest ./...
 
-  # Eine Backend-Änderung kann die GUI brechen, ohne dass in tallox.gui etwas committet wird —
-  # ein umbenanntes Feld, ein Resolver, der jetzt null liefert. Der E2E-Lauf dort baut dieses
-  # Repository mit und ist die einzige Stufe, die das bemerkt; ohne diesen Anstoß liefe er
-  # aber erst beim nächsten GUI-Commit, also möglicherweise Wochen später.
+  # A backend change can break the GUI without anything being committed in tallox.gui — a
+  # renamed field, a resolver that now returns null. The end-to-end run over there builds
+  # this repository as well and is the only stage that notices; without this nudge it would
+  # only run on the next GUI commit, possibly weeks later.
   #
-  # Feature-Gate wie beim Release: das braucht ein Token mit Schreibrecht auf tallox.gui.
-  # Bis es angelegt ist, bleibt die Stufe still, statt bei jedem Push an einer fehlenden
-  # Konfiguration zu scheitern.
+  # A feature gate, as for the release: this needs a token with write access to tallox.gui.
+  # Until one exists the stage stays quiet, rather than failing on every push because of
+  # missing configuration.
   notify-gui:
     needs: [lint, generate, test, test-from-scratch]
     if: ${{ github.ref == 'refs/heads/main' && vars.GUI_E2E_DISPATCH_ENABLED == 'true' }}
@@ -140,7 +140,8 @@ jobs:
       - name: dispatch to tallox.gui
         env:
           GH_TOKEN: ${{ secrets.GUI_DISPATCH_TOKEN }}
-          # Niemals ${{ }} direkt in `run:` — der Wert würde in die Shell-Zeile interpoliert.
+          # Never put ${{ }} straight into `run:` — the value would be interpolated into
+          # the shell line itself.
           SHA: ${{ github.sha }}
         run: |
           gh api repos/obcode/tallox.gui/dispatches \
@@ -150,10 +151,10 @@ jobs:
 
   release:
     needs: [lint, generate, test, test-from-scratch]
-    # Feature-Gate wie beim Deploy: erst auf true stellen, wenn das Secret RELEASE_TOKEN
-    # angelegt ist. secrets lassen sich in einem job-level `if` nicht auswerten, deshalb
-    # eine Repo-Variable. Bis dahin bleibt die Pipeline grün, statt bei jedem Push an einer
-    # fehlenden Konfiguration zu scheitern.
+    # A feature gate, as for the deploy: set it to true once the RELEASE_TOKEN secret
+    # exists. Secrets cannot be evaluated in a job-level `if`, hence a repository variable.
+    # Until then the pipeline stays green rather than failing on every push because of
+    # missing configuration.
     if: ${{ github.ref == 'refs/heads/main' && vars.RELEASE_ENABLED == 'true' }}
     runs-on: ubuntu-latest
     permissions:

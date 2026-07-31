@@ -3,8 +3,9 @@
 GraphQL backend for **Tallox** (from *Teacher Allocations*), the teaching-assignment
 planning system (*Einsatzplanung*) of faculty 07 at Hochschule München.
 
-> **Status: early construction.** The repository structure, tooling and CI are in place; the
-> domain model is being built. See [CLAUDE.md](CLAUDE.md) for the architecture.
+> **Status: early construction.** Tooling, CI, identity and authorization are in place;
+> the planning domain — modules, instances, wishes — is being built. See
+> [CLAUDE.md](CLAUDE.md) for the architecture.
 
 ## What it does
 
@@ -45,7 +46,7 @@ Create a token in the web UI under `/account/tokens`; the plaintext is shown onc
 $ curl -sS https://<host>/api/graphql \
     -H "Authorization: Bearer $TALLOX_TOKEN" \
     -H 'Content-Type: application/json' \
-    -d '{"query":"{ me { email role } }"}'
+    -d '{"query":"{ me { mail name roles } }"}'
 ```
 
 ## Stack
@@ -70,9 +71,13 @@ goose -dir db/migrations postgres "$TALLOX_DB_URL" up
 gowatch                                               # live-reloading server on :8080
 ```
 
-Locally `auth.mode: dev` injects an ADMIN user on the browser path, so the GraphQL playground
-at `/` works without a login. The **token path stays real** even in dev — it needs an actual
-PAT from the local database, which keeps the production code path exercised.
+The server needs `TALLOX_DB_URL` and applies the embedded migrations at startup.
+
+Locally `-auth-mode=dev` injects a development user on the browser path, so the GraphQL
+playground at `/` works without a login. That user holds every role; to see what a colleague
+with one role sees, seed a person and send `X-Remote-User` yourself. The **token path stays
+real** even in dev — it needs an actual PAT from the local database, which keeps the
+production code path exercised daily instead of discovered in October.
 
 ## Layout
 
