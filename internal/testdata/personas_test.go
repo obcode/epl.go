@@ -5,6 +5,9 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/google/uuid"
+
+	"github.com/obcode/tallox.go/internal/principal"
 	"github.com/obcode/tallox.go/internal/testdata"
 )
 
@@ -47,17 +50,81 @@ func TestPersonasAreFictionalAndDistinct(t *testing.T) {
 func TestPersonaTokensMatchTheProductionFormat(t *testing.T) {
 	t.Parallel()
 
+	ids := map[string]string{}
+
 	for _, p := range testdata.All() {
 		if !tokenFormat.MatchString(p.Token) {
 			t.Errorf("%s: token %q does not match the production format — a fixture the real "+
 				"parser would reject makes a passing test meaningless", p.Name, p.Token)
 		}
-		// The all-A prefix is what .gitleaks.toml allowlists as "obviously not a secret".
-		// Without it the pre-commit hook blocks the commit that adds the persona.
-		if !strings.HasPrefix(p.Token, "tallox_AAAAAAAAAAAAAAAA_") {
-			t.Errorf("%s: token does not use the gitleaks-allowlisted AAAA prefix, so "+
-				"committing it will be blocked", p.Name)
+		// The "example" secret prefix is what .gitleaks.toml allowlists as "obviously not a
+		// secret". Without it the pre-commit hook blocks the commit that adds the persona.
+		if !strings.HasPrefix(p.Token, "tallox_"+p.TokenID+"_example") {
+			t.Errorf("%s: token %q is not tallox_<TokenID>_example… — either the id and the "+
+				"token have drifted apart, or the gitleaks allowlist will not recognise it "+
+				"and committing the fixture will be blocked", p.Name, p.Token)
 		}
+		// Distinct ids, because the token id is the primary key of the token table: a cast
+		// that shares one cannot be seeded into a single schema, and the natural repair is to
+		// seed fewer people — which removes the colleague the confidentiality rule is about.
+		if previous, dup := ids[p.TokenID]; dup {
+			t.Errorf("%s and %s share the token id %q — they cannot both exist in one "+
+				"database", previous, p.Name, p.TokenID)
+		}
+		ids[p.TokenID] = p.Name
+	}
+}
+
+// TestPersonaIDsAreStableAndDistinct covers what a derived id has to be good for: the same
+// persona is the same person in a store test, in an API test and in a golden file, and no two
+// personas are accidentally the same row.
+//
+// Anon is the case worth stating out loud. An unauthenticated caller has uuid.Nil, which is
+// also what an unset owner column holds — the pair principal.Actor.Owns exists to refuse.
+func TestPersonaIDsAreStableAndDistinct(t *testing.T) {
+	t.Parallel()
+
+	if testdata.Anon.ID() != uuid.Nil {
+		t.Errorf("Anon has id %v, want the nil UUID", testdata.Anon.ID())
+	}
+
+	seen := map[uuid.UUID]string{}
+	for _, p := range testdata.All() {
+		id := p.ID()
+		if id == uuid.Nil {
+			t.Errorf("%s has the nil UUID, which no authenticated persona may have", p.Name)
+		}
+		if id != p.ID() {
+			t.Errorf("%s: ID() is not stable across calls", p.Name)
+		}
+		if previous, dup := seen[id]; dup {
+			t.Errorf("%s and %s derive the same id %v", previous, p.Name, id)
+		}
+		seen[id] = p.Name
+	}
+}
+
+// TestActorCarriesTheDoorItCameThrough: the token id belongs on a token actor and nowhere
+// else. It is what the audit log resolves after a token has been revoked, and a browser
+// session that carried one would attribute a person's clicks to a script.
+func TestActorCarriesTheDoorItCameThrough(t *testing.T) {
+	t.Parallel()
+
+	browser := testdata.Eins.Actor(principal.KindInteractive, "DOZENT")
+	if browser.TokenID != "" {
+		t.Errorf("an interactive actor carries token id %q", browser.TokenID)
+	}
+	if !browser.Authenticated() || browser.ID != testdata.Eins.ID() {
+		t.Errorf("actor id is %v, want %v", browser.ID, testdata.Eins.ID())
+	}
+
+	token := testdata.Eins.Actor(principal.KindToken, "DOZENT")
+	if token.TokenID != testdata.Eins.TokenID {
+		t.Errorf("token actor carries token id %q, want %q", token.TokenID, testdata.Eins.TokenID)
+	}
+	if token.ID != browser.ID {
+		t.Error("the same persona has different ids on the two doors — a token would not be " +
+			"the same principal as its owner, which is the whole invariant")
 	}
 }
 
