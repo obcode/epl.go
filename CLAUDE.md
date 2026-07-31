@@ -16,8 +16,15 @@ It is the backend for `tallox.gui` **and a first-class API**: colleagues use Per
 Tokens to write their own evaluations. Every rule the GUI appears to enforce is enforced
 here, because the token path bypasses the GUI entirely.
 
-Domain terminology is German; code, identifiers, comments and commit messages are English.
-User-facing strings (policy `Reason` texts, validation messages) stay German.
+**Everything in this repository is written in English** — identifiers, enum values, comments,
+commit messages, documentation. The domain is German (Fachgruppe, Deputat, Wunsch), and the
+translation happens once, in `tallox.gui`, where the terms are read by the people who use
+them. The only German in the Go code is the user-facing strings the GUI shows: policy
+`Reason` texts, validation messages, and the authentication refusals in `internal/auth`.
+
+The mapping between the two vocabularies is written down once, in the doc comment on
+`policy.Role`: LECTURER = Dozent:in, SUBJECT_GROUP_LEAD = Fachgruppenleitung,
+PROGRAMME_LEAD = Studiengangsleitung, DEANS_OFFICE = Dekanat.
 
 **This repository is public.** No hostnames, no operational detail, no names of colleagues in
 fixtures, tests, comments or commit messages. Test data is invented (`prof.eins@example.org`),
@@ -51,7 +58,7 @@ bootstrap/                 flags, viper config, wiring, chi router, graceful shu
 graph/                     gqlgen: *.graphqls (follow-schema) + *.resolvers.go — thin
 internal/buildinfo/        the ldflags version stamp. Shared by main, /healthz and `buildInfo`.
 internal/principal/        the authenticated Actor in the context. stdlib + uuid only.
-internal/auth/             two authenticators, one middleware
+internal/auth/             two authenticators, one middleware, the PAT format
 internal/policy/           visibility and phase rules. Pure: no DB, no HTTP, no GraphQL.
 internal/domain/           business logic
 internal/store/            the ONLY owner of pgxpool. sqlc-generated queries.
@@ -96,9 +103,15 @@ The same gqlgen handler is mounted on both, so there is no second schema and no 
 
 A token can never exceed its owner's role; demoting a user instantly demotes their tokens.
 
-`auth.mode` is `dev` | `proxy` | `off-token`, not a boolean. In `dev` the browser path injects
-an ADMIN dev user **but the token path stays real** — that way the production code path is
-exercised daily instead of discovered in October.
+`auth.mode` is `dev` | `proxy` | `off-token`, not a boolean (`-auth-mode`, default `proxy`).
+In `dev` the browser path injects a development user **but the token path stays real** — that
+way the production code path is exercised daily instead of discovered in October. Sending
+`X-Remote-User` by hand still goes through the ordinary lookup, which is how one checks what a
+single role actually sees. `off-token` does not mount `/api/graphql` at all: an emergency stop
+that removes the route leaves no code path that could be wrong about whether it is engaged.
+
+The server reads `TALLOX_DB_URL` from the environment and applies the embedded migrations at
+startup. Without a database it refuses to start — it cannot authenticate anybody.
 
 ### Scopes
 
@@ -128,9 +141,19 @@ Belt and braces: keep personnel data in its own root fields rather than hanging 
 
 ## Policy: the rule that carries the project
 
-Wishes are confidential until published. Visible iff owner ∨ role ∈ {Planer, Dekanat} ∨
-`semester.wishes_published_at IS NOT NULL`. The purpose is *kein Windhundverfahren* — a leak
-here is political damage, not a bug.
+Wishes are confidential until published. Visible iff owner ∨ (a planning role or the dean's
+office, **and** an interactive session) ∨ `semester.wishes_published_at IS NOT NULL`. The
+purpose is to end the first-come-first-served race — a leak here is political damage, not a
+bug.
+
+Two decisions inside that rule are decisions rather than mechanics, and both are visible in
+the golden matrix:
+
+- A **Personal Access Token never reads somebody else's unpublished wish**, not even for a
+  planner. A token is long-lived, sits in a script, and decouples "who saw this" from any
+  login event. Own entries stay readable through both doors — that is their own data.
+- **ADMIN is not on the exception list.** Running the system is a different job from planning
+  with it; an administrator who needs to look is granted DEANS_OFFICE, visibly.
 
 `internal/policy` is pure and holds the rule in **two consistent forms**:
 
@@ -160,7 +183,10 @@ derived from the calendar**.
 
 ## Configuration
 
-viper, single file `tallox.yaml` (in `.` or `$HOME`), plus `TALLOX_DB_URL` from the environment.
+Today: flags (`-addr`, `-playground`, `-auth-mode`, `-auth-dev-user`) plus `TALLOX_DB_URL`
+from the environment. The viper file below is the intended shape, not yet the implemented one.
+
+Planned: viper, single file `tallox.yaml` (in `.` or `$HOME`), plus `TALLOX_DB_URL` from the environment.
 Secrets stay in the file, never in the database.
 
 Rule of thumb: YAML holds bootstrap values and secrets. Everything semester-scoped and
