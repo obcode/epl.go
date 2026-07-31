@@ -16,7 +16,31 @@
 -- internal/store/storetest). Without WITH SCHEMA public, each test would install its own
 -- copy of citext into its own schema and drop it again — slow, and it would make the
 -- extension's location depend on who ran the migration.
-CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+--
+-- The exception handler is not defensive padding. `CREATE EXTENSION IF NOT EXISTS` is *not*
+-- atomic: the existence check and the catalog insert are separate steps, so two sessions that
+-- run it at the same moment both see "not there" and the loser gets
+--
+--     duplicate key value violates unique constraint "pg_extension_name_index"  (23505)
+--
+-- Two things do exactly that. In CI, the integration tests migrate their schemas in parallel
+-- against a database created seconds earlier. In production, a deploy that starts two API
+-- replicas has both applying migrations at startup. Neither shows up on a developer machine,
+-- where the extension has existed since the volume was created and the IF NOT EXISTS
+-- short-circuits — which is why this arrived as a red CI job rather than as a local failure.
+--
+-- +goose StatementBegin
+DO $$
+BEGIN
+    CREATE EXTENSION IF NOT EXISTS citext WITH SCHEMA public;
+EXCEPTION
+    WHEN unique_violation OR duplicate_object THEN
+        -- Another session installed it between our check and our insert. That is the outcome
+        -- we wanted; only the bookkeeping collided.
+        NULL;
+END
+$$;
+-- +goose StatementEnd
 
 -- +goose Down
 

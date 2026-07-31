@@ -39,9 +39,9 @@ func TestMigrationsApplyFromNothing(t *testing.T) {
 
 // TestMigrationsAreIdempotent asserts that running the migrator twice is a no-op.
 //
-// Not academic: migrations are applied at startup, and every deploy restarts the container.
-// A second run has to be free, and it has to be free even when two replicas start at the same
-// moment — goose takes a lock for that, and this test is where the lock's absence would show.
+// Not academic: migrations are applied at startup, and every deploy restarts the container,
+// so a second run has to cost nothing. Sequentially, that is — the simultaneous case is
+// TestMigrationsSurviveConcurrentMigrators below, and it is a genuinely different question.
 func TestMigrationsAreIdempotent(t *testing.T) {
 	t.Parallel()
 
@@ -53,6 +53,52 @@ func TestMigrationsAreIdempotent(t *testing.T) {
 	}
 	if applied != 0 {
 		t.Errorf("a second migration run applied %d migrations, want 0", applied)
+	}
+}
+
+// TestMigrationsSurviveConcurrentMigrators runs several migrators at the same moment.
+//
+// This is the test that a red CI job bought. `CREATE EXTENSION IF NOT EXISTS` is not atomic:
+// the existence check and the catalog insert are separate steps, so two sessions doing it
+// simultaneously both see "not there" and the loser gets SQLSTATE 23505 on
+// pg_extension_name_index. Sequential idempotence — running twice, one after the other —
+// passes right through that.
+//
+// It matters twice over. In CI the integration tests migrate their schemas in parallel
+// against a database created seconds earlier, and in production a deploy that starts two API
+// replicas has both migrating at startup. Neither is reproducible on a developer machine,
+// where the extension has existed since the volume was created and the IF NOT EXISTS
+// short-circuits — so locally this test is nearly vacuous and in CI it is the real thing.
+// That asymmetry is exactly why the from-scratch CI job exists.
+func TestMigrationsSurviveConcurrentMigrators(t *testing.T) {
+	t.Parallel()
+
+	const migrators = 4
+
+	schemas := make([]*storetest.Schema, migrators)
+	for i := range schemas {
+		schemas[i] = storetest.NewEmpty(t)
+	}
+
+	// A barrier, so the migrations genuinely overlap. Starting four goroutines and hoping
+	// the scheduler interleaves them would make this test pass for the wrong reason on a
+	// loaded machine.
+	start := make(chan struct{})
+	errs := make(chan error, migrators)
+
+	for _, s := range schemas {
+		go func() {
+			<-start
+			_, err := store.Migrate(context.Background(), s.DB)
+			errs <- err
+		}()
+	}
+	close(start)
+
+	for range migrators {
+		if err := <-errs; err != nil {
+			t.Errorf("concurrent migration failed: %v", err)
+		}
 	}
 }
 
