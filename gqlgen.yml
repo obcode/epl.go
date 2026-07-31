@@ -1,0 +1,45 @@
+# gqlgen configuration. Run `go generate ./...` after editing graph/*.graphqls.
+
+schema:
+  - graph/*.graphqls
+
+# follow-schema for both exec and resolvers: one generated file and one resolver file per
+# schema file. With a single schema this looks like ceremony; with a dozen (semester,
+# module, instance, wish, token, …) it is the difference between a reviewable diff and a
+# 20k-line file that every branch conflicts on.
+exec:
+  layout: follow-schema
+  dir: graph/generated
+  package: generated
+
+model:
+  filename: graph/model/models_gen.go
+  package: model
+
+resolver:
+  layout: follow-schema
+  dir: graph
+  package: graph
+  filename_template: "{name}.resolvers.go"
+
+# Hand-written types in graph/model are picked up automatically, so a type with `db:` tags
+# does not need an entry here.
+autobind:
+  - "github.com/obcode/tallox.go/graph/model"
+
+models:
+  ID:
+    model:
+      - github.com/99designs/gqlgen/graphql.ID
+      - github.com/99designs/gqlgen/graphql.Int
+      - github.com/99designs/gqlgen/graphql.Int64
+      - github.com/99designs/gqlgen/graphql.Int32
+  Int:
+    model:
+      - github.com/99designs/gqlgen/graphql.Int
+      - github.com/99designs/gqlgen/graphql.Int64
+      - github.com/99designs/gqlgen/graphql.Int32
+  # Not in graph/model: the build stamp is a property of the process, not of the domain.
+  # main and /healthz use the same struct.
+  BuildInfo:
+    model: github.com/obcode/tallox.go/internal/buildinfo.Info

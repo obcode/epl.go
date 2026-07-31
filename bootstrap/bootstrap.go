@@ -13,23 +13,31 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/extension"
+	"github.com/99designs/gqlgen/graphql/handler/lru"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
+	"github.com/99designs/gqlgen/graphql/playground"
 	"github.com/go-chi/chi/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"github.com/vektah/gqlparser/v2/ast"
+
+	"github.com/obcode/tallox.go/graph"
+	"github.com/obcode/tallox.go/graph/generated"
+	"github.com/obcode/tallox.go/internal/buildinfo"
 )
 
-// BuildInfo carries the ldflags-injected version stamp from main.
-type BuildInfo struct {
-	Version string
-	Commit  string
-	Date    string
-}
-
 // Serve parses flags, sets up logging and runs the HTTP server until a signal arrives.
-func Serve(build BuildInfo) {
+func Serve(build buildinfo.Info) {
 	var (
 		verbose = flag.Bool("v", false, "verbose (debug) logging")
 		addr    = flag.String("addr", ":8080", "listen address")
+		// The playground is a development convenience, not a public surface: in production
+		// Caddy routes only /query and /api/graphql to this container, so "/" is not
+		// reachable from outside anyway. Introspection is a separate matter and stays on —
+		// see CLAUDE.md, the API is a product here.
+		playgroundEnabled = flag.Bool("playground", true, "serve the GraphQL playground at /")
 	)
 	flag.Parse()
 
@@ -37,12 +45,12 @@ func Serve(build BuildInfo) {
 	log.Info().
 		Str("version", build.Version).
 		Str("commit", build.Commit).
-		Str("date", build.Date).
+		Str("builtAt", build.BuiltAt).
 		Msg("tallox starting")
 
 	srv := &http.Server{
 		Addr:              *addr,
-		Handler:           router(build),
+		Handler:           router(build, *playgroundEnabled),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
@@ -65,7 +73,7 @@ func Serve(build BuildInfo) {
 	}
 }
 
-func router(build BuildInfo) http.Handler {
+func router(build buildinfo.Info, playgroundEnabled bool) http.Handler {
 	r := chi.NewRouter()
 
 	// Liveness for the container healthcheck and the deploy workflow. Deliberately outside
@@ -77,18 +85,43 @@ func router(build BuildInfo) http.Handler {
 		})
 	})
 
-	// The two GraphQL mounts (/query behind the proxy header, /api/graphql behind bearer
-	// tokens) are added here once the schema exists. Until then the paths answer 501 rather
-	// than 404, so a misconfigured Caddy branch is distinguishable from a missing route.
-	notReady := func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusNotImplemented, map[string]string{
-			"error": "GraphQL endpoint not implemented yet",
-		})
+	// ONE handler on both doors. /query gets the identity from the auth proxy's
+	// X-Remote-User, /api/graphql from a bearer token — but they share a schema, a resolver
+	// root and an AroundOperations chain, so a rule added for the browser cannot be missing
+	// on the token path. The authenticating middleware differs per mount and goes on here
+	// once it exists; the schema below it never does.
+	gql := graphqlHandler(build)
+	r.Handle("/query", gql)
+	r.Handle("/api/graphql", gql)
+
+	if playgroundEnabled {
+		r.Handle("/", playground.Handler("Tallox", "/query"))
 	}
-	r.Handle("/query", http.HandlerFunc(notReady))
-	r.Handle("/api/graphql", http.HandlerFunc(notReady))
 
 	return r
+}
+
+// graphqlHandler builds the gqlgen server. Transports are listed explicitly rather than
+// taken from NewDefaultServer: the default set includes websockets, and a subscription
+// transport that nobody has thought about is an auth path that nobody has thought about.
+func graphqlHandler(build buildinfo.Info) http.Handler {
+	srv := handler.New(generated.NewExecutableSchema(generated.Config{
+		Resolvers: &graph.Resolver{Build: build},
+	}))
+
+	srv.AddTransport(transport.Options{})
+	srv.AddTransport(transport.GET{})
+	srv.AddTransport(transport.POST{})
+
+	srv.SetQueryCache(lru.New[*ast.QueryDocument](1000))
+
+	// Introspection stays on, in production too. The API is a product: it is what makes
+	// editor completion, codegen and schema exploration work for colleagues writing their
+	// own evaluations against a Personal Access Token.
+	srv.Use(extension.Introspection{})
+	srv.Use(extension.AutomaticPersistedQuery{Cache: lru.New[string](100)})
+
+	return srv
 }
 
 func writeJSON(w http.ResponseWriter, status int, v any) {

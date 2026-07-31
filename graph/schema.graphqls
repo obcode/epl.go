@@ -1,0 +1,31 @@
+"""
+Version and provenance of the running server instance.
+
+Deliberately the smallest possible field: it exists so that the deployed version is visible
+in the GUI footer without reading container tags on the host, and so that both doors
+(`/query` behind the auth proxy, `/api/graphql` behind a bearer token) have something
+harmless to answer during a smoke test.
+"""
+type BuildInfo {
+  "Semantic version from the release tag, or `dev` in a local build."
+  version: String!
+  "Git commit the binary was built from, or `none`."
+  commit: String!
+  "Build timestamp in RFC 3339, or `unknown`."
+  builtAt: String!
+}
+
+type Query {
+  """
+  Build stamp of this server.
+
+  Unauthenticated on purpose. The footer has to render before a session exists, and a smoke
+  test that fails on authorization cannot tell a broken proxy from a broken server.
+
+  NOTE: once the `@scope` directive lands this field needs an explicit
+  `@scope(area: PUBLIC, verb: READ)`. The fail-closed CI test — every root field carries a
+  scope or the build breaks — will point right here, which is why this is a note and not a
+  reminder someone has to remember.
+  """
+  buildInfo: BuildInfo!
+}

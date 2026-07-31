@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/obcode/tallox.go/bootstrap"
+	"github.com/obcode/tallox.go/internal/buildinfo"
 )
 
 // Injected via ldflags at build time; see Dockerfile.
@@ -27,9 +28,9 @@ func main() {
 		time.Local = loc
 	}
 
-	bootstrap.Serve(bootstrap.BuildInfo{
+	bootstrap.Serve(buildinfo.Info{
 		Version: version,
 		Commit:  commit,
-		Date:    date,
+		BuiltAt: date,
 	})
 }

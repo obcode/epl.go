@@ -46,6 +46,7 @@ leak path is a colleague's evaluation script, not the server.
 main.go                    version, time.Local = Europe/Berlin, bootstrap.Serve()
 bootstrap/                 flags, viper config, wiring, chi router, graceful shutdown
 graph/                     gqlgen: *.graphqls (follow-schema) + *.resolvers.go — thin
+internal/buildinfo/        the ldflags version stamp. Shared by main, /healthz and `buildInfo`.
 internal/principal/        the authenticated Actor in the context. stdlib + uuid only.
 internal/auth/             two authenticators, one middleware
 internal/policy/           visibility and phase rules. Pure: no DB, no HTTP, no GraphQL.
