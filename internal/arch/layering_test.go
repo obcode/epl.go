@@ -10,7 +10,7 @@ import (
 	"testing"
 )
 
-const modulePath = "github.com/obcode/epl.go"
+const modulePath = "github.com/obcode/tallox.go"
 
 // dbPackages must not be imported outside the storage layer.
 var dbPackages = []string{

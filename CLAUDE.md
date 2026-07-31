@@ -1,18 +1,18 @@
 # CLAUDE.md
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this
-repository. The workspace-level file at `/workspace/CLAUDE.md` (from the private `epl.dev`
+repository. The workspace-level file at `/workspace/CLAUDE.md` (from the private `tallox.dev`
 repo) applies as well and covers the domain glossary, the cross-repo workflow and the git
 conventions.
 
 ## Overview
 
-`epl.go` is the GraphQL backend for **EPL**, the teaching-assignment planning system
-(*Einsatzplanung*) of faculty 07 at Hochschule München. It models the planning process
+`tallox.go` is the GraphQL backend for **Tallox** (from *Teacher Allocations*), the
+teaching-assignment planning system (*Einsatzplanung*) of faculty 07 at Hochschule München. It models the planning process
 defined in FKR 387/378: study-programme leads declare which course instances are needed,
 lecturers register interest, subject-group leads assign, and the dean's office evaluates.
 
-It is the backend for `epl.gui` **and a first-class API**: colleagues use Personal Access
+It is the backend for `tallox.gui` **and a first-class API**: colleagues use Personal Access
 Tokens to write their own evaluations. Every rule the GUI appears to enforce is enforced
 here, because the token path bypasses the GUI entirely.
 
@@ -27,18 +27,18 @@ not anonymised-real.
 
 ```bash
 go build ./...
-go test ./...                      # integration tests need $EPL_TEST_DB_URL
+go test ./...                      # integration tests need $TALLOX_TEST_DB_URL
 go test ./internal/policy/ -run TestVisibilityMatrix
 go vet ./...
 golangci-lint-v2 run               # note the -v2 binary name
 go generate ./...                  # gqlgen, after editing graph/*.graphqls
 sqlc generate                      # after editing db/queries/*.sql
-goose -dir db/migrations postgres "$EPL_DB_URL" up
+goose -dir db/migrations postgres "$TALLOX_DB_URL" up
 ```
 
 Pre-commit hooks run gofmt, go vet, golangci-lint-v2 and gitleaks. Run `pre-commit install`
-once. The gitleaks config carries a rule for the `epl_` token format — the realistic leak path
-is a colleague's evaluation script, not the server.
+once. The gitleaks config carries a rule for the `tallox_` token format — the realistic
+leak path is a colleague's evaluation script, not the server.
 
 ## Architecture
 
@@ -152,7 +152,7 @@ derived from the calendar**.
 
 ## Configuration
 
-viper, single file `epl.yaml` (in `.` or `$HOME`), plus `EPL_DB_URL` from the environment.
+viper, single file `tallox.yaml` (in `.` or `$HOME`), plus `TALLOX_DB_URL` from the environment.
 Secrets stay in the file, never in the database.
 
 Rule of thumb: YAML holds bootstrap values and secrets. Everything semester-scoped and
@@ -174,8 +174,8 @@ disabled in production.
   "Not found" is `(nil, nil)`.
 - **Tests:** stdlib `testing`, table-driven with `t.Run`. No testify, no mock library — seams
   are narrow hand-written interfaces (see `auth.UserLookup`, `auth.TokenLookup`).
-  Integration tests use `$EPL_TEST_DB_URL`, get their own schema and drop it in `t.Cleanup`.
-  CI sets `EPL_TEST_DB_REQUIRED=1` so a skipped integration test is a failure rather than
+  Integration tests use `$TALLOX_TEST_DB_URL`, get their own schema and drop it in `t.Cleanup`.
+  CI sets `TALLOX_TEST_DB_REQUIRED=1` so a skipped integration test is a failure rather than
   silently green.
 - **Migrations:** goose, embedded, applied at startup. Steps must be idempotent; never edit
   or reorder a released migration.

@@ -38,7 +38,7 @@ func Serve(build BuildInfo) {
 		Str("version", build.Version).
 		Str("commit", build.Commit).
 		Str("date", build.Date).
-		Msg("epl starting")
+		Msg("tallox starting")
 
 	srv := &http.Server{
 		Addr:              *addr,

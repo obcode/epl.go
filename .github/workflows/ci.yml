@@ -27,21 +27,21 @@ jobs:
       postgres:
         image: postgres:18
         env:
-          POSTGRES_USER: epl
-          POSTGRES_PASSWORD: epl
-          POSTGRES_DB: epl_test
+          POSTGRES_USER: tallox
+          POSTGRES_PASSWORD: tallox
+          POSTGRES_DB: tallox_test
         ports:
           - 5432:5432
         options: >-
-          --health-cmd "pg_isready -U epl -d epl_test"
+          --health-cmd "pg_isready -U tallox -d tallox_test"
           --health-interval 5s
           --health-timeout 5s
           --health-retries 10
     env:
-      EPL_TEST_DB_URL: postgres://epl:epl@127.0.0.1:5432/epl_test?sslmode=disable
+      TALLOX_TEST_DB_URL: postgres://tallox:tallox@127.0.0.1:5432/tallox_test?sslmode=disable
       # Ohne das würden Integrationstests bei einem DB-Problem still übersprungen — "grün"
       # und "nie gelaufen" sähen dann gleich aus.
-      EPL_TEST_DB_REQUIRED: "1"
+      TALLOX_TEST_DB_REQUIRED: "1"
     steps:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v7

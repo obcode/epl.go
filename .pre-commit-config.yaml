@@ -17,7 +17,7 @@ repos:
     rev: v8.30.0
     hooks:
       - id: gitleaks
-        # Custom ruleset adds the epl_ Personal Access Token format.
+        # Custom ruleset adds the tallox_ Personal Access Token format.
         args: ["--config", ".gitleaks.toml"]
 
   - repo: local

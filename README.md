@@ -1,15 +1,15 @@
-# epl.go
+# tallox.go
 
-GraphQL backend for **EPL**, the teaching-assignment planning system (*Einsatzplanung*) of
-faculty 07 at Hochschule München.
+GraphQL backend for **Tallox** (from *Teacher Allocations*), the teaching-assignment
+planning system (*Einsatzplanung*) of faculty 07 at Hochschule München.
 
 > **Status: early construction.** The repository structure, tooling and CI are in place; the
 > domain model is being built. See [CLAUDE.md](CLAUDE.md) for the architecture.
 
 ## What it does
 
-Faculty 07 plans, every semester, which courses are offered and who teaches them. EPL models
-that process:
+Faculty 07 plans, every semester, which courses are offered and who teaches them. Tallox
+models that process:
 
 1. **Bedarfsplanung** — study-programme leads declare which course instances are needed.
 2. **Wunschphase** — lecturers register interest in instances. Those entries stay invisible
@@ -29,7 +29,7 @@ The GraphQL API is a product, not just a contract with the web UI.
 | Path | Authentication | For |
 | --- | --- | --- |
 | `POST /query` | `X-Remote-User`, injected by the auth proxy after OIDC | browser and server-side rendering |
-| `POST /api/graphql` | `Authorization: Bearer epl_…` | scripts and evaluations |
+| `POST /api/graphql` | `Authorization: Bearer tallox_…` | scripts and evaluations |
 
 Both mount the **same** GraphQL handler and the same authorization model:
 
@@ -43,7 +43,7 @@ Create a token in the web UI under `/account/tokens`; the plaintext is shown onc
 
 ```console
 $ curl -sS https://<host>/api/graphql \
-    -H "Authorization: Bearer $EPL_TOKEN" \
+    -H "Authorization: Bearer $TALLOX_TOKEN" \
     -H 'Content-Type: application/json' \
     -d '{"query":"{ me { email role } }"}'
 ```
@@ -57,7 +57,7 @@ No ORM: SQL is written by hand in `db/queries/`, sqlc turns it into typed Go.
 
 ## Development
 
-Everything runs in the DevContainer from the `epl.dev` repo — Go, Node, PostgreSQL and all
+Everything runs in the DevContainer from the `tallox.dev` repo — Go, Node, PostgreSQL and all
 tooling, one *Reopen in Container* away.
 
 ```bash
@@ -66,7 +66,7 @@ go test ./...
 golangci-lint-v2 run
 go generate ./...                                     # gqlgen
 sqlc generate                                         # db/queries/*.sql -> Go
-goose -dir db/migrations postgres "$EPL_DB_URL" up
+goose -dir db/migrations postgres "$TALLOX_DB_URL" up
 gowatch                                               # live-reloading server on :8080
 ```
 

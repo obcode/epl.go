@@ -1,14 +1,14 @@
-// Command epl is the GraphQL backend of the EPL teaching-assignment planning system.
+// Command tallox is the GraphQL backend of the Tallox teaching-assignment planning system.
 //
 // It has no subcommands: the binary starts the server. Everything else is a GraphQL query,
-// mutation or subscription, driven either from epl.gui or from a script holding a Personal
+// mutation or subscription, driven either from tallox.gui or from a script holding a Personal
 // Access Token.
 package main
 
 import (
 	"time"
 
-	"github.com/obcode/epl.go/bootstrap"
+	"github.com/obcode/tallox.go/bootstrap"
 )
 
 // Injected via ldflags at build time; see Dockerfile.

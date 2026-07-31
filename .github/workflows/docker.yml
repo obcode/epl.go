@@ -40,14 +40,14 @@ jobs:
     needs: build-and-push
     runs-on: ubuntu-latest
     steps:
-      # Die Deploy-Artefakte liegen im privaten Repo epl.dev. Statt sie hier zu spiegeln,
+      # Die Deploy-Artefakte liegen im privaten Repo tallox.dev. Statt sie hier zu spiegeln,
       # löst der Release dort einen Workflow aus. DISPATCH_TOKEN ist ein fine-grained PAT
-      # mit ausschließlich "contents: write" auf obcode/epl.dev.
-      - name: Deploy in epl.dev auslösen
+      # mit ausschließlich "contents: write" auf obcode/tallox.dev.
+      - name: Deploy in tallox.dev auslösen
         env:
           GH_TOKEN: ${{ secrets.DISPATCH_TOKEN }}
         run: |
           set -euo pipefail
-          gh api repos/obcode/epl.dev/dispatches \
+          gh api repos/obcode/tallox.dev/dispatches \
             -f event_type=deploy-api \
             -F "client_payload[tag]=${{ github.event.release.tag_name }}"

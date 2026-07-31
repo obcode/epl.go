@@ -1,4 +1,4 @@
-module github.com/obcode/epl.go
+module github.com/obcode/tallox.go
 
 go 1.26.5
 

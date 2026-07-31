@@ -15,7 +15,7 @@ COPY . .
 
 RUN CGO_ENABLED=0 go build -trimpath \
     -ldflags "-s -w -X main.version=${VERSION} -X main.commit=${GIT_COMMIT} -X main.date=${BUILD_TIME}" \
-    -o /out/epl .
+    -o /out/tallox .
 
 # Auf die Patch-Version gepinnt, nicht `latest` und nicht `3.24`: nur an einem
 # vergleichbaren Tag kann Dependabot ein Update erkennen. Der PR wird zu einem
@@ -30,15 +30,15 @@ FROM alpine:3.24.1
 RUN apk add --no-cache ca-certificates tzdata
 
 # Nicht als root. Feste UID, damit ein gemountetes Volume vorhersagbare Besitzverhältnisse hat.
-RUN adduser -D -u 10001 epl
+RUN adduser -D -u 10001 tallox
 
 WORKDIR /app
-COPY --from=builder /out/epl /app/epl
+COPY --from=builder /out/tallox /app/tallox
 
-USER epl
+USER tallox
 EXPOSE 8080
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD wget -qO- http://127.0.0.1:8080/healthz || exit 1
 
-ENTRYPOINT ["/app/epl"]
+ENTRYPOINT ["/app/tallox"]
