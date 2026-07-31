@@ -111,6 +111,10 @@ way the production code path is exercised daily instead of discovered in October
 single role actually sees. `off-token` does not mount `/api/graphql` at all: an emergency stop
 that removes the route leaves no code path that could be wrong about whether it is engaged.
 
+`gowatch` passes `-auth-mode=dev` for the local loop; without it the server would run in
+proxy mode behind no proxy, and every request would be anonymous while every process looks
+healthy.
+
 The server reads `TALLOX_DB_URL` from the environment and applies the embedded migrations at
 startup. Without a database it refuses to start — it cannot authenticate anybody.
 
