@@ -86,7 +86,7 @@ func ParseMode(s string) (Mode, error) {
 func (m Mode) TokenDoorEnabled() bool { return m != ModeOffToken }
 
 // Person is what a lookup returns about a human being: enough to build an actor, and nothing
-// else. No Deputat, no notes — those are personnel data and they have no business travelling
+// else. No teaching load, no notes — those are personnel data and they have no business travelling
 // through the authentication path.
 type Person struct {
 	ID     uuid.UUID

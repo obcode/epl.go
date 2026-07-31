@@ -24,9 +24,6 @@ import (
 //     this project will be asked in front of a room, and the answer should be a printed table
 //     generated from the code that enforces it — not a drawing that agrees with it today.
 //
-// Which is why it is rendered in German, unlike everything else in this repository: it is read
-// by the colleagues the rule protects, not only by whoever maintains it.
-//
 // Re-record with: go test ./internal/policy/ -update-golden — and then read the diff.
 func TestVisibilityMatrix(t *testing.T) {
 	t.Parallel()
@@ -43,7 +40,7 @@ type caller struct {
 
 func callers() []caller {
 	out := []caller{{
-		label: "(nicht angemeldet)",
+		label: "(not signed in)",
 		door:  "—",
 		actor: principal.Anonymous,
 	}}
@@ -53,8 +50,8 @@ func callers() []caller {
 			label string
 			kind  principal.Kind
 		}{
-			{"interaktiv", principal.KindInteractive},
-			{"Token", principal.KindToken},
+			{"interactive", principal.KindInteractive},
+			{"token", principal.KindToken},
 		} {
 			out = append(out, caller{
 				label: string(role),
@@ -71,7 +68,7 @@ func renderMatrix() string {
 
 	b.WriteString(matrixPreamble)
 
-	header := row("Rolle", "Tür", "Phase", "Wünsche", "eigener", "fremder", "Filter")
+	header := row("Role", "Door", "Phase", "Wishes", "own", "other", "Filter")
 	b.WriteString(header)
 	b.WriteString(rule(header))
 
@@ -80,8 +77,8 @@ func renderMatrix() string {
 			label string
 			state policy.SemesterState
 		}{
-			{"unveröffentlicht", unpublished},
-			{"veröffentlicht", published},
+			{"unpublished", unpublished},
+			{"published", published},
 		} {
 			for _, phase := range policy.AllPhases() {
 				s := state.state
@@ -109,55 +106,57 @@ func renderMatrix() string {
 	return b.String()
 }
 
-const matrixPreamble = `Wunsch-Sichtbarkeit — wer sieht welchen Wunsch, wann
-===================================================
+const matrixPreamble = `Wish visibility — who sees which wish, and when
+===============================================
 
-Erzeugt aus internal/policy (TestVisibilityMatrix). Nicht von Hand ändern:
+Generated from internal/policy (TestVisibilityMatrix). Do not edit by hand:
 
     go test ./internal/policy/ -update-golden
 
-Die Regel
----------
+The rule
+--------
 
-Ein Wunsch ist sichtbar genau dann, wenn
+A wish is visible if and only if
 
-  · er der anfragenden Person selbst gehört, oder
-  · die Wünsche des Semesters veröffentlicht sind
-    (semester.wishes_published_at IS NOT NULL), oder
-  · die Person plant (Fachgruppen- oder Studiengangsleitung) bzw. zum Dekanat gehört —
-    und dann nur in einer interaktiven Sitzung, nicht über ein Personal Access Token.
+  · it belongs to the person asking, or
+  · the wishes of that semester have been published
+    (semester.wishes_published_at IS NOT NULL), or
+  · that person plans (subject group lead or programme lead) or belongs to the dean's office
+    — and then only in an interactive session, never through a Personal Access Token.
 
-Zweck: kein Windhundverfahren. Neue Kolleg:innen sollen sich eintragen können, ohne dass es
-wie ein Angriff auf eine alteingesessene Person wirkt.
+The purpose is to end the first-come-first-served race: a new colleague should be able to
+register interest without it looking like an attack on somebody who has taught the subject
+for years.
 
-Die Spalten
+The columns
 -----------
 
-  eigener / fremder   Sieht diese Person ihren eigenen bzw. einen fremden Wunsch?
-  Filter              Dieselbe Regel als Query-Einschränkung. **Zählungen laufen durch
-                      genau diesen Filter** — sonst verrät „3 Kolleg:innen haben bereits
-                      Interesse" die Information vollständig, ohne einen Namen zu nennen.
+  own / other   Does this person see their own wish / somebody else's?
+  Filter        The same rule as a query restriction. **Counts run through exactly this
+                filter** — otherwise "three colleagues have already registered interest"
+                gives the confidential answer away in full, without naming anybody.
 
-Anmerkungen
------------
+Notes
+-----
 
-  · Die Phase steht in jeder Zeile und ändert die Antwort nie. Veröffentlicht wird über einen
-    eigenen Zeitstempel, nicht über die Phase: die Wunschphase kann enden, ohne dass
-    veröffentlicht wird, und veröffentlicht werden, während die Zuteilung läuft.
-  · Mehrfachrollen sind nicht aufgeführt. Wer mehrere Rollen hält, sieht die Vereinigung —
-    geprüft über das vollständige Kreuzprodukt in TestGuardAndFilterAgree.
-  · ADMIN ist bewusst kein Wunsch-Leser. Das System zu betreiben ist eine andere Aufgabe als
-    damit zu planen; wer wirklich hineinsehen muss, bekommt sichtbar die Rolle DEKANAT.
-  · Über ein Personal Access Token sieht auch eine planende Person nur die eigenen Wünsche,
-    solange nicht veröffentlicht ist. Ein langlebiges Token in einem Skript ermöglicht
-    stillen Massenexport und entkoppelt „wer hat das gesehen" von einem Login-Ereignis.
+  · The phase appears in every row and never changes the answer. Publication is a timestamp
+    of its own, not a consequence of the phase: the wish phase can end without publishing,
+    and publication can happen while the assignment is already running.
+  · Combinations of roles are not listed. Somebody holding several sees the union — checked
+    over the complete cartesian product in TestGuardAndFilterAgree.
+  · ADMIN is deliberately not a wish reader. Running the system is a different job from
+    planning with it; an administrator who genuinely needs to look is granted DEANS_OFFICE,
+    visibly.
+  · Through a Personal Access Token, even a planner sees only their own wishes until
+    publication. A long-lived token in a script makes silent bulk export possible and
+    decouples "who saw this" from any login event.
 
 `
 
 // widths are the column widths, in runes. Fixed rather than computed, so that adding a role
 // with a long name produces a visible one-line change here instead of reflowing the entire
 // file and drowning the actual diff.
-var widths = []int{20, 11, 16, 18, 9, 9, 12}
+var widths = []int{20, 13, 17, 13, 6, 7, 10}
 
 func row(cells ...string) string {
 	var b strings.Builder
@@ -190,19 +189,19 @@ func pad(s string, n int) string {
 
 func answer(ok bool) string {
 	if ok {
-		return "ja"
+		return "yes"
 	}
-	return "nein"
+	return "no"
 }
 
 func filterLabel(f policy.WishFilter) string {
 	switch f.Scope {
 	case policy.WishScopeAll:
-		return "alle"
+		return "all"
 	case policy.WishScopeOwn:
-		return "nur eigene"
+		return "own only"
 	case policy.WishScopeNone:
-		return "kein Zugriff"
+		return "no access"
 	default:
 		return fmt.Sprintf("?? %s", f.Scope)
 	}

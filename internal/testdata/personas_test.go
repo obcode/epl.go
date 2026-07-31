@@ -19,7 +19,7 @@ var tokenFormat = regexp.MustCompile(`^tallox_[0-9A-HJKMNP-TV-Z]{16}_[A-Za-z0-9_
 // TestPersonasAreFictionalAndDistinct guards the rule that this repository is public.
 //
 // The failure it prevents is not a crash. It is a fixture that quietly names a real
-// colleague, in a public repository, next to a Deputat column — a thing that is trivially
+// colleague, in a public repository, next to a teaching-load column — a thing that is trivially
 // avoided at the moment of writing and awkward to undo once it is in the git history of a
 // public remote.
 func TestPersonasAreFictionalAndDistinct(t *testing.T) {
@@ -110,7 +110,7 @@ func TestPersonaIDsAreStableAndDistinct(t *testing.T) {
 func TestActorCarriesTheDoorItCameThrough(t *testing.T) {
 	t.Parallel()
 
-	browser := testdata.Eins.Actor(principal.KindInteractive, "DOZENT")
+	browser := testdata.Eins.Actor(principal.KindInteractive, "LECTURER")
 	if browser.TokenID != "" {
 		t.Errorf("an interactive actor carries token id %q", browser.TokenID)
 	}
@@ -118,7 +118,7 @@ func TestActorCarriesTheDoorItCameThrough(t *testing.T) {
 		t.Errorf("actor id is %v, want %v", browser.ID, testdata.Eins.ID())
 	}
 
-	token := testdata.Eins.Actor(principal.KindToken, "DOZENT")
+	token := testdata.Eins.Actor(principal.KindToken, "LECTURER")
 	if token.TokenID != testdata.Eins.TokenID {
 		t.Errorf("token actor carries token id %q, want %q", token.TokenID, testdata.Eins.TokenID)
 	}

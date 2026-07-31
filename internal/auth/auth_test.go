@@ -97,7 +97,7 @@ func TestProxyDoorResolvesTheHeaderAgainstTheDatabase(t *testing.T) {
 	t.Parallel()
 
 	users := fakeUsers{people: map[string]*auth.Person{
-		testdata.Vier.Mail: person(testdata.Vier, policy.RoleDozent, policy.RoleStudiengangsleitung),
+		testdata.Vier.Mail: person(testdata.Vier, policy.RoleLecturer, policy.RoleProgrammeLead),
 	}}
 	a := auth.NewProxyAuthenticator(auth.Config{Mode: auth.ModeProxy, Users: users})
 
@@ -126,11 +126,11 @@ func TestProxyDoorResolvesTheHeaderAgainstTheDatabase(t *testing.T) {
 func TestProxyDoorRefusals(t *testing.T) {
 	t.Parallel()
 
-	inactive := person(testdata.Zwei, policy.RoleDozent)
+	inactive := person(testdata.Zwei, policy.RoleLecturer)
 	inactive.Active = false
 
 	users := fakeUsers{people: map[string]*auth.Person{
-		testdata.Eins.Mail: person(testdata.Eins, policy.RoleDozent),
+		testdata.Eins.Mail: person(testdata.Eins, policy.RoleLecturer),
 		testdata.Zwei.Mail: inactive,
 	}}
 
@@ -201,7 +201,7 @@ func TestProxyDoorIgnoresBearerTokens(t *testing.T) {
 	t.Parallel()
 
 	users := fakeUsers{people: map[string]*auth.Person{
-		testdata.Eins.Mail: person(testdata.Eins, policy.RoleDozent),
+		testdata.Eins.Mail: person(testdata.Eins, policy.RoleLecturer),
 	}}
 	a := auth.NewProxyAuthenticator(auth.Config{Mode: auth.ModeProxy, Users: users})
 
@@ -221,7 +221,7 @@ func TestDevModeInjectsAUserButKeepsTheHeaderWorking(t *testing.T) {
 	t.Parallel()
 
 	users := fakeUsers{people: map[string]*auth.Person{
-		testdata.Eins.Mail: person(testdata.Eins, policy.RoleDozent),
+		testdata.Eins.Mail: person(testdata.Eins, policy.RoleLecturer),
 	}}
 	a := auth.NewProxyAuthenticator(auth.Config{Mode: auth.ModeDev, Users: users})
 
@@ -259,7 +259,7 @@ func TestDevModeInjectsAUserButKeepsTheHeaderWorking(t *testing.T) {
 func TestTokenDoorAuthenticatesItsOwner(t *testing.T) {
 	t.Parallel()
 
-	owner := person(testdata.Vier, policy.RoleDozent, policy.RoleStudiengangsleitung)
+	owner := person(testdata.Vier, policy.RoleLecturer, policy.RoleProgrammeLead)
 	used := make(chan string, 1)
 	tokens := fakeTokens{
 		tokens: map[string]*auth.Token{testdata.Vier.TokenID: tokenFor(t, testdata.Vier, owner)},
@@ -310,7 +310,7 @@ func TestTokenDoorAuthenticatesItsOwner(t *testing.T) {
 func TestTokenDoorRefusals(t *testing.T) {
 	t.Parallel()
 
-	owner := person(testdata.Eins, policy.RoleDozent)
+	owner := person(testdata.Eins, policy.RoleLecturer)
 
 	expired := tokenFor(t, testdata.Eins, owner)
 	expired.ExpiresAt = time.Now().Add(-time.Minute)
@@ -318,7 +318,7 @@ func TestTokenDoorRefusals(t *testing.T) {
 	revoked := tokenFor(t, testdata.Eins, owner)
 	revoked.RevokedAt = time.Now().Add(-time.Hour)
 
-	inactiveOwner := person(testdata.Eins, policy.RoleDozent)
+	inactiveOwner := person(testdata.Eins, policy.RoleLecturer)
 	inactiveOwner.Active = false
 	leaver := tokenFor(t, testdata.Eins, inactiveOwner)
 
@@ -433,7 +433,7 @@ func TestRefusalsNeverNameSomebodyElse(t *testing.T) {
 	t.Parallel()
 
 	tokens := fakeTokens{tokens: map[string]*auth.Token{
-		testdata.Eins.TokenID: tokenFor(t, testdata.Eins, person(testdata.Eins, policy.RoleDozent)),
+		testdata.Eins.TokenID: tokenFor(t, testdata.Eins, person(testdata.Eins, policy.RoleLecturer)),
 	}}
 	a := auth.NewTokenAuthenticator(auth.Config{Mode: auth.ModeProxy, Tokens: tokens})
 	t.Cleanup(a.Wait)

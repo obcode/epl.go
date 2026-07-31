@@ -1,7 +1,7 @@
 -- Migration 2: who may use this system, and by what credential.
 --
 -- Deliberately identity only. No modules, no instances, no wishes: the primary key of an
--- instance — module, module version, module + Studiengang, module + Studiengang + LV-Art — is
+-- instance — module, module version, module + programme, module + programme + course type — is
 -- the most expensive open question in the project and it is not answered yet. A released
 -- migration is never edited, so writing those tables now would freeze a guess. Identity does
 -- not depend on that answer, and everything above it (the auth middleware, the policy, both
@@ -13,7 +13,7 @@
 -- ------
 --
 -- One row per person who appears in the planning, whether they ever log in or not: the
--- Studiengangsleitung needs to say "this instance is Prof. X's" before Prof. X has been near
+-- programme lead needs to say "this instance is Prof. X's" before Prof. X has been near
 -- the tool.
 CREATE TABLE person (
     id         uuid PRIMARY KEY DEFAULT gen_random_uuid(),
@@ -48,11 +48,11 @@ CREATE TABLE person (
 -- -----------
 --
 -- Roles as rows rather than columns, because a person holds several: the same colleague leads
--- a Fachgruppe and a Studiengang, and every rule in internal/policy therefore asks about the
+-- a subject group and a study programme, and every rule in internal/policy therefore asks about the
 -- set rather than about "the" role.
 --
--- The grant is unscoped for now. Which Fachgruppe a Fachgruppenleitung leads becomes a
--- question the moment Fachgruppen exist as rows, and the migration that creates them is where
+-- The grant is unscoped for now. Which group a subject group lead leads becomes a question
+-- the moment subject groups exist as rows, and the migration that creates them is where
 -- the scoped grant belongs — as its own table, so this one never has to be edited. Nothing
 -- shipped so far depends on the answer: wish confidentiality is faculty-wide.
 CREATE TABLE person_role (
@@ -78,10 +78,10 @@ CREATE TABLE person_role (
     -- role the policy knows that the database rejects on write — so internal/store carries a
     -- test that reads this constraint and compares it with policy.AllRoles().
     CONSTRAINT person_role_role_known CHECK (role IN (
-        'DOZENT',
-        'FACHGRUPPENLEITUNG',
-        'STUDIENGANGSLEITUNG',
-        'DEKANAT',
+        'LECTURER',
+        'SUBJECT_GROUP_LEAD',
+        'PROGRAMME_LEAD',
+        'DEANS_OFFICE',
         'ADMIN'
     ))
 );

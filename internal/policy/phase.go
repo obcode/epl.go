@@ -10,21 +10,21 @@ package policy
 // faculty retreat: somebody flips it, and everyone can see who and when.
 //
 // The phase is separate from wishes_published_at. It is tempting to fold them together —
-// "publication happens when the Wunschphase ends" — but the process needs both halves
-// independently: the Wunschphase can close without publishing (so late entries stop while the
-// planners work), and publication can happen while the Zuteilung is already running. Folding
+// "publication happens when the wish phase ends" — but the process needs both halves
+// independently: the wish phase can close without publishing (so late entries stop while the
+// planners work), and publication can happen while the assignment is already running. Folding
 // them would make one of those two impossible, and it is not knowable today which one the
 // faculty will need first.
 type Phase string
 
 const (
-	// PhaseBedarfsplanung is when the Studiengangsleitungen declare which instances are needed.
-	PhaseBedarfsplanung Phase = "BEDARFSPLANUNG"
-	// PhaseWunschphase is when lecturers register interest. Entries are confidential — that is
+	// PhaseDemandPlanning is when the programme leads declare which instances are needed.
+	PhaseDemandPlanning Phase = "DEMAND_PLANNING"
+	// PhaseWishes is when lecturers register interest. Entries are confidential — that is
 	// the point of the phase, not a property of it.
-	PhaseWunschphase Phase = "WUNSCHPHASE"
-	// PhaseZuteilung is when the Fachgruppenleitungen fill the instances.
-	PhaseZuteilung Phase = "ZUTEILUNG"
+	PhaseWishes Phase = "WISHES"
+	// PhaseAssignment is when the subject group leads fill the instances.
+	PhaseAssignment Phase = "ASSIGNMENT"
 	// PhaseFinal is when the plan stands. Changes from here on are corrections, not planning.
 	PhaseFinal Phase = "FINAL"
 )
@@ -35,9 +35,9 @@ const (
 // a separately maintained rank — one list to get wrong instead of two.
 func AllPhases() []Phase {
 	return []Phase{
-		PhaseBedarfsplanung,
-		PhaseWunschphase,
-		PhaseZuteilung,
+		PhaseDemandPlanning,
+		PhaseWishes,
+		PhaseAssignment,
 		PhaseFinal,
 	}
 }
@@ -47,7 +47,7 @@ func AllPhases() []Phase {
 // Unlike an unknown role, an unknown phase is not something a rule can shrug off: it means
 // the semester row says something this code cannot act on. Callers get the false and are
 // expected to treat it as an error rather than substituting a default — a default here would
-// most likely be BEDARFSPLANUNG, which is the most permissive phase for writes.
+// most likely be DEMAND_PLANNING, which is the most permissive phase for writes.
 func ParsePhase(s string) (Phase, bool) {
 	for _, p := range AllPhases() {
 		if string(p) == s {

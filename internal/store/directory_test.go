@@ -32,7 +32,7 @@ func TestDirectoryAnswersTheBrowserDoor(t *testing.T) {
 
 	s := storetest.New(t)
 	storetest.SeedPerson(t, s, testdata.Vier,
-		string(policy.RoleDozent), string(policy.RoleStudiengangsleitung))
+		string(policy.RoleLecturer), string(policy.RoleProgrammeLead))
 
 	d := store.NewDirectory(s.Pool)
 
@@ -92,7 +92,7 @@ func TestDirectoryAnswersTheTokenDoor(t *testing.T) {
 	t.Parallel()
 
 	s := storetest.New(t)
-	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleDozent))
+	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleLecturer))
 	storetest.SeedToken(t, s, testdata.Eins,
 		auth.HashSecret(secretOf(t, testdata.Eins)),
 		storetest.TokenOptions{Scopes: []string{"wishes:read"}})

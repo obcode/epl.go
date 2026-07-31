@@ -20,8 +20,8 @@
 // # Why roles are opaque strings
 //
 // An Actor carries the role grants exactly as they are stored, and does not interpret them.
-// The meaning of DOZENT or DEKANAT lives in internal/policy, which is where the rules that
-// use them live. Two consequences, both deliberate:
+// The meaning of LECTURER or DEANS_OFFICE lives in internal/policy, which is where the rules
+// that use them live. Two consequences, both deliberate:
 //
 //   - The dependency runs policy → principal and never back. If Role were defined here,
 //     principal would either import policy (a cycle) or own a copy of the rules' vocabulary

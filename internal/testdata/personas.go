@@ -28,7 +28,8 @@ import (
 // Persona is one invented person, described by the part they play in a test rather than by an
 // organisational role.
 //
-// Roles (DOZENT, PLANER, …) deliberately do not appear here. They belong to internal/policy,
+// Roles (LECTURER, PROGRAMME_LEAD, …) deliberately do not appear here. They belong to
+// internal/policy,
 // which is where the rules that use them live; duplicating them into fixtures would create a
 // second list to keep in sync, and a stale role in a fixture makes a policy test pass while
 // the policy is wrong. A test that needs a persona to hold a role says so at the call site —
@@ -117,7 +118,7 @@ var (
 		Part:    "an unrelated colleague at the same level",
 	}
 
-	// Drei leads a Fachgruppe: allowed to assign within her group, not beyond it. The persona
+	// Drei leads a subject group: allowed to assign within it, not beyond it. The persona
 	// for "the permission exists but is scoped", which is the case a boolean role check gets
 	// wrong.
 	Drei = Persona{
@@ -125,7 +126,7 @@ var (
 		Name:    "Prof. Drei",
 		TokenID: "CCCCCCCCCCCCCCCC",
 		Token:   "tallox_CCCCCCCCCCCCCCCC_example_drei_000000000000000000000000000000",
-		Part:    "leads one Fachgruppe — permitted inside it, not outside",
+		Part:    "leads one subject group — permitted inside it, not outside",
 	}
 
 	// Vier plans. Sees wishes before publication because the process requires it, which makes
@@ -143,7 +144,7 @@ var (
 	// axes and a test that conflates them will not notice when they get conflated in code.
 	Fuenf = Persona{
 		Mail:    "dekanat@example.org",
-		Name:    "Dekanat",
+		Name:    "Deans Office",
 		TokenID: "EEEEEEEEEEEEEEEE",
 		Token:   "tallox_EEEEEEEEEEEEEEEE_example_fuenf_00000000000000000000000000000",
 		Part:    "dean's office — reads across programmes, writes little",

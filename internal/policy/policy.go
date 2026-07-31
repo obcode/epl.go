@@ -36,6 +36,8 @@
 //
 // # Language
 //
-// Identifiers and comments are English; the domain vocabulary that has no useful translation
-// (Fachgruppe, Dozent, Deputat, Wunsch) stays German, as does anything a user reads.
+// Everything here is English, identifiers and comments alike. The domain is German — the
+// faculty says Fachgruppe, Deputat, Wunsch — and the translation happens once, in the GUI,
+// rather than being scattered through the code as a half-German vocabulary that a newcomer
+// has to learn before they can read a rule.
 package policy

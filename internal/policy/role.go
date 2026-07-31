@@ -6,34 +6,44 @@ import (
 	"github.com/obcode/tallox.go/internal/principal"
 )
 
-// Role is a grant a person holds. The names are the German ones the faculty uses, because
-// they are the terms in FKR 387/378 and in every conversation about the process — translating
-// them would mean maintaining a glossary between the code and the people the code is for.
+// Role is a grant a person holds.
+//
+// The names are English, like every other identifier in this repository, and the GUI
+// translates them for the people who read them. The mapping to the faculty's own vocabulary,
+// once, so that nobody has to guess it twice:
+//
+//	LECTURER            Dozent:in
+//	SUBJECT_GROUP_LEAD  Fachgruppenleitung
+//	PROGRAMME_LEAD      Studiengangsleitung
+//	DEANS_OFFICE        Dekanat
+//	ADMIN               Administration
+//
+// That table is the only German in this package, and it is here so that nobody has to
+// reconstruct the mapping from a GUI label.
 type Role string
 
 const (
-	// RoleDozent is the baseline: teaches, maintains a profile and a Kompetenzzone, registers
-	// interest in instances. Everybody who appears in the planning has it.
-	RoleDozent Role = "DOZENT"
+	// RoleLecturer is the baseline: teaches, maintains a profile and a competence profile,
+	// registers interest in instances. Everybody who appears in the planning has it.
+	RoleLecturer Role = "LECTURER"
 
-	// RoleFachgruppenleitung assigns the instances of one Fachgruppe.
+	// RoleSubjectGroupLead assigns the instances of one subject group.
 	//
-	// The grant is stored unscoped for now — which Fachgruppe it applies to becomes a
-	// question the moment Fachgruppen exist as rows, and the migration that creates them is
-	// where the scoped grant belongs. Nothing in this file depends on the answer: the only
-	// rule shipped so far, wish confidentiality, is faculty-wide by construction. Anything
-	// that does depend on it must wait for the scoped form rather than approximate it with
-	// this one.
-	RoleFachgruppenleitung Role = "FACHGRUPPENLEITUNG"
+	// The grant is stored unscoped for now — which group it applies to becomes a question the
+	// moment subject groups exist as rows, and the migration that creates them is where the
+	// scoped grant belongs. Nothing in this file depends on the answer: the only rule shipped
+	// so far, wish confidentiality, is faculty-wide by construction. Anything that does depend
+	// on it must wait for the scoped form rather than approximate it with this one.
+	RoleSubjectGroupLead Role = "SUBJECT_GROUP_LEAD"
 
-	// RoleStudiengangsleitung declares the demand of one Studiengang: which instances have to
-	// be offered, the Pflicht and Wahlpflicht catalogue, the FWP wildcards. Unscoped for the
-	// same reason as above.
-	RoleStudiengangsleitung Role = "STUDIENGANGSLEITUNG"
+	// RoleProgrammeLead declares the demand of one study programme: which instances have to be
+	// offered, the compulsory and elective catalogues, the FWP wildcards. Unscoped for the same
+	// reason as above.
+	RoleProgrammeLead Role = "PROGRAMME_LEAD"
 
-	// RoleDekanat reads across programmes for the import/export statistics and maintains the
-	// Deputat traffic light. Reads a great deal, writes almost nothing.
-	RoleDekanat Role = "DEKANAT"
+	// RoleDeansOffice reads across programmes for the import/export statistics and maintains
+	// the teaching-load traffic light. Reads a great deal, writes almost nothing.
+	RoleDeansOffice Role = "DEANS_OFFICE"
 
 	// RoleAdmin administers users, roles and tokens.
 	//
@@ -51,10 +61,10 @@ const (
 // rule that treated it as one would be wrong the first time somebody holds two of them.
 func AllRoles() []Role {
 	return []Role{
-		RoleDozent,
-		RoleFachgruppenleitung,
-		RoleStudiengangsleitung,
-		RoleDekanat,
+		RoleLecturer,
+		RoleSubjectGroupLead,
+		RoleProgrammeLead,
+		RoleDeansOffice,
 		RoleAdmin,
 	}
 }
@@ -77,8 +87,8 @@ func ParseRole(s string) (Role, bool) {
 }
 
 // RoleSet is the set of roles one actor holds. A person can hold several — the same colleague
-// may lead a Fachgruppe and a Studiengang — so every rule below asks about the set, never
-// about "the" role.
+// may lead a subject group and a study programme — so every rule below asks about the set,
+// never about "the" role.
 type RoleSet map[Role]bool
 
 // RolesOf reads the grants off an actor, dropping anything this package does not recognise.
@@ -112,7 +122,7 @@ func (rs RoleSet) Any(roles ...Role) bool {
 // Plans reports whether these roles run the planning process — the people who have to see
 // what is on the table before it is public, because their job is to fill the gaps.
 func (rs RoleSet) Plans() bool {
-	return rs.Any(RoleFachgruppenleitung, RoleStudiengangsleitung)
+	return rs.Any(RoleSubjectGroupLead, RoleProgrammeLead)
 }
 
 // Sorted returns the roles in AllRoles order, for rendering and for stable test output.

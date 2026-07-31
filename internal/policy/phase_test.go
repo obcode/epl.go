@@ -13,9 +13,9 @@ func TestAllPhasesAreTheProcessInOrder(t *testing.T) {
 	t.Parallel()
 
 	want := []policy.Phase{
-		policy.PhaseBedarfsplanung,
-		policy.PhaseWunschphase,
-		policy.PhaseZuteilung,
+		policy.PhaseDemandPlanning,
+		policy.PhaseWishes,
+		policy.PhaseAssignment,
 		policy.PhaseFinal,
 	}
 
@@ -48,8 +48,8 @@ func TestAllPhasesAreTheProcessInOrder(t *testing.T) {
 // cannot act on.
 //
 // The tempting implementations both fail dangerously: a rank of -1 makes an unknown phase
-// earlier than everything (so every "has the Bedarfsplanung passed?" answers no), and a
-// default of BEDARFSPLANUNG makes it the most permissive phase for writes. Refusing to order
+// earlier than everything (so every "has demand planning passed?" answers no), and a
+// default of DEMAND_PLANNING makes it the most permissive phase for writes. Refusing to order
 // it at all leaves the caller with a decision to make, which is the correct outcome for a
 // value that should not exist.
 func TestAnUnknownPhaseIsNeitherBeforeNorAfter(t *testing.T) {

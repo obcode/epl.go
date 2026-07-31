@@ -23,7 +23,7 @@ func TestPersonByMailReturnsTheRolesInOneRoundTrip(t *testing.T) {
 
 	s := storetest.New(t)
 	storetest.SeedPerson(t, s, testdata.Drei,
-		string(policy.RoleDozent), string(policy.RoleFachgruppenleitung))
+		string(policy.RoleLecturer), string(policy.RoleSubjectGroupLead))
 
 	got, err := s.Queries().PersonByMail(t.Context(), testdata.Drei.Mail)
 	if err != nil {
@@ -38,7 +38,7 @@ func TestPersonByMailReturnsTheRolesInOneRoundTrip(t *testing.T) {
 	}
 	// Sorted by the query, so that a role set renders identically in a log line, a golden file
 	// and a GraphQL response regardless of the order the grants were inserted in.
-	want := []string{string(policy.RoleDozent), string(policy.RoleFachgruppenleitung)}
+	want := []string{string(policy.RoleLecturer), string(policy.RoleSubjectGroupLead)}
 	if strings.Join(got.Roles, ",") != strings.Join(want, ",") {
 		t.Errorf("roles are %v, want %v", got.Roles, want)
 	}
@@ -76,7 +76,7 @@ func TestMailMatchingIgnoresCase(t *testing.T) {
 	t.Parallel()
 
 	s := storetest.New(t)
-	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleDozent))
+	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleLecturer))
 
 	for _, spelling := range []string{
 		testdata.Eins.Mail,
@@ -180,14 +180,14 @@ func TestUnknownRolesCannotBeGranted(t *testing.T) {
 	s := storetest.New(t)
 	storetest.SeedPerson(t, s, testdata.Vier)
 
-	// "PLANER" is the word the documentation uses for the concept, which makes it exactly the
+	// "PLANNER" is the word the documentation uses for the concept, which makes it exactly the
 	// string somebody will one day try to grant.
 	err := s.Queries().GrantRole(t.Context(), store.GrantRoleParams{
 		PersonID: testdata.Vier.ID(),
-		Role:     "PLANER",
+		Role:     "PLANNER",
 	})
 	if err == nil {
-		t.Error("the role PLANER was accepted — the CHECK constraint is not doing its job")
+		t.Error("the role PLANNER was accepted — the CHECK constraint is not doing its job")
 	}
 }
 
@@ -197,11 +197,11 @@ func TestGrantingTwiceIsNotAnError(t *testing.T) {
 	t.Parallel()
 
 	s := storetest.New(t)
-	storetest.SeedPerson(t, s, testdata.Vier, string(policy.RoleDozent))
+	storetest.SeedPerson(t, s, testdata.Vier, string(policy.RoleLecturer))
 
 	grant := store.GrantRoleParams{
 		PersonID: testdata.Vier.ID(),
-		Role:     string(policy.RoleDozent),
+		Role:     string(policy.RoleLecturer),
 	}
 	if err := s.Queries().GrantRole(t.Context(), grant); err != nil {
 		t.Fatalf("granting an existing role failed: %v", err)
@@ -223,11 +223,11 @@ func TestRevokingARoleTakesItAway(t *testing.T) {
 
 	s := storetest.New(t)
 	storetest.SeedPerson(t, s, testdata.Vier,
-		string(policy.RoleDozent), string(policy.RoleStudiengangsleitung))
+		string(policy.RoleLecturer), string(policy.RoleProgrammeLead))
 
 	err := s.Queries().RevokeRole(t.Context(), store.RevokeRoleParams{
 		PersonID: testdata.Vier.ID(),
-		Role:     string(policy.RoleStudiengangsleitung),
+		Role:     string(policy.RoleProgrammeLead),
 	})
 	if err != nil {
 		t.Fatalf("cannot revoke: %v", err)
@@ -237,7 +237,7 @@ func TestRevokingARoleTakesItAway(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot read back: %v", err)
 	}
-	if len(got.Roles) != 1 || got.Roles[0] != string(policy.RoleDozent) {
-		t.Errorf("roles after revocation are %v, want only %s", got.Roles, policy.RoleDozent)
+	if len(got.Roles) != 1 || got.Roles[0] != string(policy.RoleLecturer) {
+		t.Errorf("roles after revocation are %v, want only %s", got.Roles, policy.RoleLecturer)
 	}
 }

@@ -46,7 +46,7 @@ func TestRoundTrip(t *testing.T) {
 		ID:      uuid.New(),
 		Mail:    "prof.eins@example.org",
 		Name:    "Prof. Eins",
-		Roles:   []string{"DOZENT"},
+		Roles:   []string{"LECTURER"},
 		Kind:    principal.KindInteractive,
 		Scopes:  []string{"wishes:read"},
 		TokenID: "",

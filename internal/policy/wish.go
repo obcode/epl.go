@@ -143,14 +143,14 @@ func WishVisibility(a principal.Actor, s SemesterState) WishFilter {
 // list of people rather than reconstructed from conditions.
 //
 // Planning roles because the process requires it: somebody has to see what is on the table in
-// order to fill the gaps. Dekanat because it evaluates across programmes.
+// order to fill the gaps. The dean's office because it evaluates across programmes.
 //
 // ADMIN is deliberately absent. Administering the system is a different job from planning
 // with it, and an exception list that a colleague can read and accept is worth more than one
 // that quietly includes whoever holds the keys. An admin who genuinely needs to look can be
-// granted DEKANAT — visibly, as an audited role grant, rather than by virtue of being an
+// granted DEANS_OFFICE — visibly, as an audited role grant, rather than by virtue of being an
 // admin. If the faculty decides otherwise at the retreat, this function and one line of the
 // golden matrix are the whole change.
 func mayReadUnpublishedWishes(rs RoleSet) bool {
-	return rs.Plans() || rs.Has(RoleDekanat)
+	return rs.Plans() || rs.Has(RoleDeansOffice)
 }

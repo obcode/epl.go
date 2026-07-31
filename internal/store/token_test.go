@@ -35,7 +35,7 @@ func TestTokenByIDCarriesTheOwnerAndTheirRoles(t *testing.T) {
 
 	s := storetest.New(t)
 	storetest.SeedPerson(t, s, testdata.Vier,
-		string(policy.RoleDozent), string(policy.RoleStudiengangsleitung))
+		string(policy.RoleLecturer), string(policy.RoleProgrammeLead))
 	storetest.SeedToken(t, s, testdata.Vier, hash(1), storetest.TokenOptions{
 		Description: "Auswertung Lehrdeputat",
 		Scopes:      []string{"wishes:read"},
@@ -63,7 +63,7 @@ func TestTokenByIDCarriesTheOwnerAndTheirRoles(t *testing.T) {
 	// Demote the owner; the token must follow immediately.
 	err = s.Queries().RevokeRole(t.Context(), store.RevokeRoleParams{
 		PersonID: testdata.Vier.ID(),
-		Role:     string(policy.RoleStudiengangsleitung),
+		Role:     string(policy.RoleProgrammeLead),
 	})
 	if err != nil {
 		t.Fatalf("cannot revoke the role: %v", err)
@@ -73,7 +73,7 @@ func TestTokenByIDCarriesTheOwnerAndTheirRoles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("cannot re-read the token: %v", err)
 	}
-	if len(got.Roles) != 1 || got.Roles[0] != string(policy.RoleDozent) {
+	if len(got.Roles) != 1 || got.Roles[0] != string(policy.RoleLecturer) {
 		t.Errorf("after revoking a role the token still carries %v — permissions are being "+
 			"copied onto the token instead of resolved from its owner", got.Roles)
 	}
@@ -90,7 +90,7 @@ func TestExpiredAndRevokedTokensAreStillReturned(t *testing.T) {
 	t.Parallel()
 
 	s := storetest.New(t)
-	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleDozent))
+	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleLecturer))
 	storetest.SeedToken(t, s, testdata.Eins, hash(2), storetest.TokenOptions{
 		ExpiresAt: time.Now().Add(-time.Hour),
 		Revoked:   true,

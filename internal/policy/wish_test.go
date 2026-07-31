@@ -14,9 +14,9 @@ import (
 
 // published and unpublished are the two states of the confidentiality window.
 var (
-	unpublished = policy.SemesterState{Phase: policy.PhaseWunschphase}
+	unpublished = policy.SemesterState{Phase: policy.PhaseWishes}
 	published   = policy.SemesterState{
-		Phase:             policy.PhaseWunschphase,
+		Phase:             policy.PhaseWishes,
 		WishesPublishedAt: time.Date(2026, 10, 27, 12, 0, 0, 0, time.Local),
 	}
 )
@@ -24,7 +24,7 @@ var (
 // roleSubsets returns every combination of roles, including none at all.
 //
 // The power set rather than one role at a time, because holding two roles is the normal case
-// here — the same colleague leads a Fachgruppe and a Studiengang — and a rule that reads "the
+// here — the same colleague leads a subject group and a study programme — and a rule that reads "the
 // role" instead of "the roles" is wrong for exactly those people. 32 combinations is small
 // enough to enumerate, so the property test below is a proof over the domain rather than a
 // sample of it.
@@ -121,12 +121,12 @@ func TestGuardAndFilterAgree(t *testing.T) {
 //
 // From the kickoff: neue Kolleg:innen sollen sich eintragen können, ohne dass es wie ein
 // Angriff auf eine alteingesessene Person wirkt. A colleague at the same level — no planning
-// role, no Dekanat — must see nothing of somebody else's entry until the semester publishes.
+// role, not the dean's office — must see nothing of somebody else's entry until publication.
 func TestColleaguesSeeNothingBeforePublication(t *testing.T) {
 	t.Parallel()
 
 	wish := policy.Wish{OwnerID: testdata.Eins.ID()}
-	colleague := testdata.Zwei.Actor(principal.KindInteractive, string(policy.RoleDozent))
+	colleague := testdata.Zwei.Actor(principal.KindInteractive, string(policy.RoleLecturer))
 
 	if policy.CanSeeWish(colleague, unpublished, wish) {
 		t.Error("a colleague sees an unpublished wish that is not theirs")
@@ -159,7 +159,7 @@ func TestPublicationOpensItForEveryone(t *testing.T) {
 	wish := policy.Wish{OwnerID: testdata.Eins.ID()}
 
 	for _, kind := range []principal.Kind{principal.KindInteractive, principal.KindToken} {
-		colleague := testdata.Zwei.Actor(kind, string(policy.RoleDozent))
+		colleague := testdata.Zwei.Actor(kind, string(policy.RoleLecturer))
 
 		if !policy.CanSeeWish(colleague, published, wish) {
 			t.Errorf("%s: a published wish is still hidden", kind)
@@ -194,9 +194,9 @@ func TestPlannersSeeEarlyButOnlyInTheBrowser(t *testing.T) {
 	wish := policy.Wish{OwnerID: testdata.Eins.ID()}
 
 	for _, role := range []policy.Role{
-		policy.RoleFachgruppenleitung,
-		policy.RoleStudiengangsleitung,
-		policy.RoleDekanat,
+		policy.RoleSubjectGroupLead,
+		policy.RoleProgrammeLead,
+		policy.RoleDeansOffice,
 	} {
 		t.Run(string(role), func(t *testing.T) {
 			t.Parallel()
@@ -232,7 +232,7 @@ func TestPlannersSeeEarlyButOnlyInTheBrowser(t *testing.T) {
 // ADMIN administers users, roles and tokens. It is deliberately not on the list of people who
 // see unpublished wishes: running the system is a different job from planning with it, and
 // the exception list is worth more to the colleagues it protects when every entry on it can
-// be justified. An admin who genuinely needs to look grants themselves DEKANAT — visibly, in
+// be justified. An admin who genuinely needs to look grants themselves DEANS_OFFICE — visibly, in
 // the audit log.
 //
 // If the faculty decides otherwise, this test is the place that says so out loud, and the
@@ -252,8 +252,8 @@ func TestAdminIsNotAWishReader(t *testing.T) {
 // TestVisibilityDoesNotDependOnThePhase states an orthogonality that is easy to lose.
 //
 // Publication is its own timestamp, not a consequence of the phase. The process needs both
-// halves independently — the Wunschphase can close without publishing, and publication can
-// happen while the Zuteilung runs — so a rule that read the phase instead of the timestamp
+// halves independently — the wish phase can close without publishing, and publication can
+// happen while the assignment runs — so a rule that read the phase instead of the timestamp
 // would work right up until the first semester where those two come apart.
 func TestVisibilityDoesNotDependOnThePhase(t *testing.T) {
 	t.Parallel()
@@ -300,9 +300,9 @@ func TestVisibilityDoesNotDependOnThePhase(t *testing.T) {
 func TestUnknownRolesGrantNothing(t *testing.T) {
 	t.Parallel()
 
-	// "PLANER" is the word CLAUDE.md uses for the concept, which makes it exactly the string
-	// somebody will one day insert while thinking it is a role.
-	impostor := testdata.Zwei.Actor(principal.KindInteractive, "PLANER", "SUPERUSER", "")
+	// "PLANNER" is the word the documentation uses for the concept, which makes it exactly the
+	// string somebody will one day insert while thinking it is a role.
+	impostor := testdata.Zwei.Actor(principal.KindInteractive, "PLANNER", "SUPERUSER", "")
 	wish := policy.Wish{OwnerID: testdata.Eins.ID()}
 
 	if roles := policy.RolesOf(impostor); len(roles) != 0 {

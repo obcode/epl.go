@@ -38,7 +38,7 @@ func TestAllRolesRoundTrip(t *testing.T) {
 		}
 	}
 
-	for _, unknown := range []string{"", "planer", "PLANER", "Dozent", "ADMIN "} {
+	for _, unknown := range []string{"", "lecturer", "Lecturer", "PLANNER", "ADMIN "} {
 		if _, ok := policy.ParseRole(unknown); ok {
 			t.Errorf("ParseRole accepted %q — role matching is exact, and case-insensitive "+
 				"matching would make a lower-cased typo a grant", unknown)
@@ -52,11 +52,11 @@ func TestRolesOfDropsWhatItDoesNotKnow(t *testing.T) {
 	t.Parallel()
 
 	actor := testdata.Drei.Actor(principal.KindInteractive,
-		string(policy.RoleDozent), "PLANER", string(policy.RoleFachgruppenleitung))
+		string(policy.RoleLecturer), "PLANNER", string(policy.RoleSubjectGroupLead))
 
 	roles := policy.RolesOf(actor)
 
-	if !roles.Has(policy.RoleDozent) || !roles.Has(policy.RoleFachgruppenleitung) {
+	if !roles.Has(policy.RoleLecturer) || !roles.Has(policy.RoleSubjectGroupLead) {
 		t.Errorf("known grants were lost: %v", roles.Sorted())
 	}
 	if len(roles) != 2 {
@@ -78,12 +78,12 @@ func TestPlansIsTheSetOfPeopleWhoFillGaps(t *testing.T) {
 		want  bool
 	}{
 		{[]policy.Role{}, false},
-		{[]policy.Role{policy.RoleDozent}, false},
+		{[]policy.Role{policy.RoleLecturer}, false},
 		{[]policy.Role{policy.RoleAdmin}, false},
-		{[]policy.Role{policy.RoleDekanat}, false}, // reads across programmes, does not plan
-		{[]policy.Role{policy.RoleFachgruppenleitung}, true},
-		{[]policy.Role{policy.RoleStudiengangsleitung}, true},
-		{[]policy.Role{policy.RoleDozent, policy.RoleStudiengangsleitung}, true},
+		{[]policy.Role{policy.RoleDeansOffice}, false}, // reads across programmes, does not plan
+		{[]policy.Role{policy.RoleSubjectGroupLead}, true},
+		{[]policy.Role{policy.RoleProgrammeLead}, true},
+		{[]policy.Role{policy.RoleLecturer, policy.RoleProgrammeLead}, true},
 	} {
 		set := policy.RoleSet{}
 		for _, r := range tc.roles {
@@ -101,10 +101,10 @@ func TestSortedIsStable(t *testing.T) {
 	t.Parallel()
 
 	set := policy.RoleSet{
-		policy.RoleAdmin:               true,
-		policy.RoleDozent:              true,
-		policy.RoleStudiengangsleitung: true,
-		policy.RoleDekanat:             false, // present in the map, not granted
+		policy.RoleAdmin:         true,
+		policy.RoleLecturer:      true,
+		policy.RoleProgrammeLead: true,
+		policy.RoleDeansOffice:   false, // present in the map, not granted
 	}
 
 	first := set.Sorted()
@@ -120,7 +120,7 @@ func TestSortedIsStable(t *testing.T) {
 		}
 	}
 
-	want := []policy.Role{policy.RoleDozent, policy.RoleStudiengangsleitung, policy.RoleAdmin}
+	want := []policy.Role{policy.RoleLecturer, policy.RoleProgrammeLead, policy.RoleAdmin}
 	if len(first) != len(want) {
 		t.Fatalf("Sorted() = %v, want %v — a false entry is not a grant", first, want)
 	}
