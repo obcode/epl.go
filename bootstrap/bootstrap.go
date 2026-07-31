@@ -73,6 +73,11 @@ func Serve(build buildinfo.Info) {
 		// answer it is reporting.
 		migrateStatus = flag.Bool("migrate-status", false,
 			"report which migrations are applied and pending, then exit")
+		// Only ever acts on a database with no people in it — see store.BootstrapAdmin. It is
+		// meant to stay set in the deploy configuration: on every restart after the first it
+		// does nothing at all.
+		bootstrapAdmin = flag.String("bootstrap-admin", "",
+			"mail address to create as the first ADMIN, if no person exists yet")
 	)
 	flag.Parse()
 
@@ -117,6 +122,30 @@ func Serve(build buildinfo.Info) {
 	if err != nil {
 		log.Fatal().Err(err).Msg("cannot reach the database")
 	}
+
+	// The bootstrap runs before `defer pool.Close()` is installed, so that its failure path
+	// may use log.Fatal like every other startup step. Afterwards the pool lives for as long
+	// as the process does.
+	//
+	// After the migrations, before serving: on a database that has never had a person in it,
+	// nobody can sign in and nobody can be given a token either, because handing out tokens is
+	// something only a signed-in administrator can do. A new installation would be locked from
+	// the outside with the key on the inside.
+	if *bootstrapAdmin != "" {
+		created, err := store.BootstrapAdmin(ctx, pool, *bootstrapAdmin, "")
+		if err != nil {
+			log.Fatal().Err(err).Msg("cannot bootstrap the first administrator")
+		}
+		if created {
+			// Loudly, once: somebody now holds ADMIN who was not granted it by a human, and
+			// that belongs in the log even though it can only ever have happened on an empty
+			// database.
+			log.Warn().Str("mail", *bootstrapAdmin).
+				Msg("created the first administrator — remove -bootstrap-admin once a second " +
+					"administrator exists")
+		}
+	}
+
 	defer pool.Close()
 
 	directory := store.NewDirectory(pool)
