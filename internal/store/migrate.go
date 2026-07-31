@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"fmt"
 	"io/fs"
+	"strings"
 
 	"github.com/pressly/goose/v3"
 
@@ -64,20 +65,32 @@ func Migrate(ctx context.Context, sqlDB *sql.DB) (int, error) {
 // database/sql and because a migration should not be holding a pooled connection that request
 // handling is waiting for.
 func MigrateUpDSN(ctx context.Context, dsn string) (int, error) {
-	db, err := sql.Open("pgx", dsn)
+	db, err := openMigrationConn(ctx, dsn)
 	if err != nil {
-		return 0, fmt.Errorf("cannot open a migration connection: %w", err)
+		return 0, err
 	}
 	defer func() { _ = db.Close() }()
+
+	return Migrate(ctx, db)
+}
+
+// openMigrationConn is the database/sql handle goose needs, and the reason both DSN-taking
+// functions above and below can exist without bootstrap ever holding one.
+func openMigrationConn(ctx context.Context, dsn string) (*sql.DB, error) {
+	db, err := sql.Open("pgx", dsn)
+	if err != nil {
+		return nil, fmt.Errorf("cannot open a migration connection: %w", err)
+	}
 
 	// goose runs one statement after another; a second connection would only add the question
 	// of which session a statement landed in.
 	db.SetMaxOpenConns(1)
 
 	if err := db.PingContext(ctx); err != nil {
-		return 0, fmt.Errorf("cannot reach the database for migrations: %w", err)
+		_ = db.Close()
+		return nil, fmt.Errorf("cannot reach the database for migrations: %w", err)
 	}
-	return Migrate(ctx, db)
+	return db, nil
 }
 
 // MigrateDown rolls back every applied migration, down to an empty schema.
@@ -103,31 +116,82 @@ func MigrateDown(ctx context.Context, sqlDB *sql.DB) error {
 	return nil
 }
 
-// PendingMigrations reports the versions that are embedded but not yet applied.
+// MigrationStatus is what the database has, and what the binary is carrying that it does not.
 //
-// The server uses this to log what it is about to do; the deploy runbook uses it to answer
-// "is this rollback safe" without guessing from tags.
-func PendingMigrations(ctx context.Context, sqlDB *sql.DB) ([]int64, error) {
+// Both halves, not just the pending ones, because the two questions asked in front of a
+// production database are different. "What is about to happen if I restart this container"
+// needs Pending. "Which schema is this database on" — the question that decides whether an
+// older image can still be started against it — needs Applied.
+type MigrationStatus struct {
+	// Applied are the versions the database has recorded, in order.
+	Applied []int64
+	// Pending are the versions embedded in this binary that the database does not have yet.
+	Pending []int64
+}
+
+// String renders the status for somebody reading a terminal, not for a parser.
+func (s MigrationStatus) String() string {
+	var b strings.Builder
+
+	fmt.Fprintf(&b, "applied: %d", len(s.Applied))
+	if n := len(s.Applied); n > 0 {
+		fmt.Fprintf(&b, " (up to %d)", s.Applied[n-1])
+	}
+	fmt.Fprintf(&b, "\npending: %d", len(s.Pending))
+	for _, v := range s.Pending {
+		fmt.Fprintf(&b, "\n  %d", v)
+	}
+	if len(s.Pending) == 0 {
+		b.WriteString("\nThe database is on the schema this binary expects.")
+	} else {
+		// Said here rather than in the runbook, because this is where somebody is standing
+		// when the question comes up.
+		b.WriteString("\nStarting this image applies them. They are not undone by a rollback:" +
+			"\npinning an older tag leaves this schema in place, so the previous image has to" +
+			"\nbe able to run against it.")
+	}
+	return b.String()
+}
+
+// StatusDSN reports the migration status over a connection of its own.
+//
+// The read-only counterpart of MigrateUpDSN, and the one the -migrate-status flag uses: it
+// answers the question without being able to change the answer. Anything that inspects
+// production before a deploy should have that property.
+func StatusDSN(ctx context.Context, dsn string) (MigrationStatus, error) {
+	db, err := openMigrationConn(ctx, dsn)
+	if err != nil {
+		return MigrationStatus{}, err
+	}
+	defer func() { _ = db.Close() }()
+
+	return Status(ctx, db)
+}
+
+// Status reports which migrations are applied and which are pending.
+func Status(ctx context.Context, sqlDB *sql.DB) (MigrationStatus, error) {
 	fsys, err := migrationsFS()
 	if err != nil {
-		return nil, err
+		return MigrationStatus{}, err
 	}
 
 	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys)
 	if err != nil {
-		return nil, fmt.Errorf("cannot set up migrations: %w", err)
+		return MigrationStatus{}, fmt.Errorf("cannot set up migrations: %w", err)
 	}
 
 	sources, err := provider.Status(ctx)
 	if err != nil {
-		return nil, fmt.Errorf("cannot read migration status: %w", err)
+		return MigrationStatus{}, fmt.Errorf("cannot read migration status: %w", err)
 	}
 
-	pending := []int64{}
+	status := MigrationStatus{Applied: []int64{}, Pending: []int64{}}
 	for _, s := range sources {
 		if s.State == goose.StatePending {
-			pending = append(pending, s.Source.Version)
+			status.Pending = append(status.Pending, s.Source.Version)
+			continue
 		}
+		status.Applied = append(status.Applied, s.Source.Version)
 	}
-	return pending, nil
+	return status, nil
 }
