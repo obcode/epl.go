@@ -6,6 +6,21 @@ sql:
     # einer zusätzlich gepflegten schema.sql, die auseinanderlaufen kann.
     schema: db/migrations
     queries: db/queries
+
+    # Für `sqlc vet` (nicht für `generate`): bereitet jede Query gegen eine echte Datenbank
+    # vor und findet damit, was der eingebaute Parser durchlässt — ein Tippfehler in einem
+    # Spaltennamen, ein Cast, den PostgreSQL anders auflöst.
+    #
+    # `sqlc vet` braucht eine erreichbare Datenbank und läuft deshalb nur lokal, nicht in der
+    # CI. `analyzer.database: false` hält `sqlc generate` davon frei: Codegenerierung muss
+    # ohne laufende Datenbank funktionieren, sonst kann ein frischer Klon nichts bauen.
+    database:
+      uri: "${TALLOX_DB_URL}"
+    analyzer:
+      database: false
+    rules:
+      - sqlc/db-prepare
+
     gen:
       go:
         package: store
@@ -26,6 +41,3 @@ sql:
             go_type: "time.Time"
           - db_type: "citext"
             go_type: "string"
-
-rules:
-  - sqlc/db-prepare
