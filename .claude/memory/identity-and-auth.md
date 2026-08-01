@@ -76,3 +76,32 @@ können sich nicht gegenseitig importieren, deshalb je ein Test:
   abgelaufenes Token ist eines, das früher angelegt wurde und seitdem abgelaufen ist.
 - **`$2 - interval '1 hour'`** in einer Query braucht `$2::timestamptz`, sonst leitet Postgres
   den Parameter als `interval` her.
+
+## Tokenverwaltung und `@interactiveOnly` (2026-08-01)
+
+`graph/directives.graphqls` + `graph/directives.go`, entschieden in
+`policy.MayReadInteractiveOnly`, verdrahtet in `bootstrap` über `graph.Directives()`.
+
+- **gqlgen fällt bei einer nicht implementierten Direktive zu**: das Feld liefert
+  `directive interactiveOnly is not implemented` statt durchzureichen. Die Verdrahtung zu
+  vergessen bricht also laut, nicht leise.
+- **Nullable Feld → `null`, non-null und Mutations → Fehler.** `myTokens` ist deshalb bewusst
+  `[PersonalAccessToken!]` (nullable Liste): ein Skript, das nebenbei danach fragt, bekommt
+  den Rest der Antwort trotzdem.
+- **Fehler gehen als `*gqlerror.Error` mit `extensions.code` raus** (`INTERACTIVE_ONLY`,
+  `TOKEN_NOT_FOUND`, `TOKEN_LIFETIME_OUT_OF_RANGE`, …). Die GUI verzweigt über den Code, nie
+  über den deutschen Satz. Nebeneffekt: löst den Konflikt mit staticcheck ST1005 (Go-Fehler
+  enden nicht auf Satzzeichen, Anzeigetexte schon) sauber statt per `nolint`.
+- **Besitz steckt im `WHERE` der Revoke-Query**, nicht in einem Read-then-check. Damit sind
+  „gibt es nicht" und „gehört Dir nicht" dieselbe Antwort — sonst wäre die Mutation ein Orakel
+  dafür, welche Token-IDs existieren.
+- **Laufzeiten werden abgelehnt, nicht gekappt.** 90 Tage Default, 365 Maximum.
+- **Kein „Token für jemand anderen anlegen".** Sonst protokolliert das Audit-Log, wer
+  *ausgestellt* hat, statt wer *gehandelt* hat.
+
+Fallstrick: **gqlgen verschiebt Hilfsfunktionen aus `*.resolvers.go` heraus** (in einen
+`!!! WARNING !!!`-Kommentarblock am Dateiende) — sie gehören in eine eigene Datei, sonst
+überleben sie das nächste `go generate` nicht. Hier: `graph/token_mapping.go`.
+
+`internal/domain` existiert seit hier: Fachlogik ohne I/O, mit einem eigenen Store-Interface,
+das `internal/store` implementiert.
