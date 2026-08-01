@@ -17,9 +17,7 @@ import (
 func TestNoConfigFileIsNotAnError(t *testing.T) {
 	t.Parallel()
 
-	inEmptyDir(t)
-
-	cfg, file, err := bootstrap.LoadConfig("")
+	cfg, file, err := bootstrap.LoadConfigFrom("", t.TempDir())
 	if err != nil {
 		t.Fatalf("loading without a file failed: %v", err)
 	}
@@ -56,9 +54,7 @@ func TestTheServerBinaryIsNotMistakenForItsConfiguration(t *testing.T) {
 		t.Fatalf("cannot write the configuration: %v", err)
 	}
 
-	inDir(t, dir)
-
-	cfg, file, err := bootstrap.LoadConfig("")
+	cfg, file, err := bootstrap.LoadConfigFrom("", dir)
 	if err != nil {
 		t.Fatalf("loading failed: %v — the binary was parsed as YAML", err)
 	}
@@ -205,28 +201,48 @@ func TestOnlyFlagsThatWereActuallySetOverrideTheFile(t *testing.T) {
 func TestAddrOverridesThePort(t *testing.T) {
 	t.Parallel()
 
-	base := bootstrap.DefaultConfig()
+	base := bootstrap.DefaultConfig() // port 8080
 
 	got, err := bootstrap.ApplyFlagOverrides(base, map[string]bool{"addr": true},
 		bootstrap.FlagOverrides{Addr: ":9000"})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if got.Server.Port != 9000 || got.Server.Addr() != ":9000" {
-		t.Errorf("port is %d (%q), want 9000", got.Server.Port, got.Server.Addr())
+	if got.Server.Addr() != ":9000" {
+		t.Errorf("listen address is %q, want :9000", got.Server.Addr())
 	}
 }
 
-// TestAddrWithAHostIsRefusedRatherThanIgnored.
+// TestAddrKeepsAHostPart is a regression test with a name attached to it.
 //
-// This server always listens on all interfaces and is reached through the reverse proxy, so
-// there is nothing to do with the host part. Dropping it silently would make
-// `-addr=127.0.0.1:8080` mean something other than what it says, which is worth an error at
-// startup rather than a surprise during a deploy.
-func TestAddrWithAHostIsRefusedRatherThanIgnored(t *testing.T) {
+// An earlier version of this refused any -addr that named a host, reasoning that the server
+// always listens on all interfaces and is reached through a reverse proxy. That is true of
+// production and of nothing else: tallox.gui's end-to-end workflow starts a throwaway backend
+// with `-addr 127.0.0.1:8080` to keep it off the runner's network, and the refusal broke a job
+// that had worked for weeks — with a message explaining, confidently, why the thing it was
+// doing was wrong.
+//
+// "Listens on all interfaces" is a property of one deployment, not of the flag.
+func TestAddrKeepsAHostPart(t *testing.T) {
 	t.Parallel()
 
-	for _, addr := range []string{"127.0.0.1:8080", "8080", ":0", ":notaport"} {
+	got, err := bootstrap.ApplyFlagOverrides(bootstrap.DefaultConfig(),
+		map[string]bool{"addr": true}, bootstrap.FlagOverrides{Addr: "127.0.0.1:8080"})
+	if err != nil {
+		t.Fatalf("-addr with a host was refused: %v", err)
+	}
+	if got.Server.Addr() != "127.0.0.1:8080" {
+		t.Errorf("listen address is %q, want the flag verbatim — dropping the host would make "+
+			"the flag mean something other than what it says", got.Server.Addr())
+	}
+}
+
+// TestAddrWithoutAUsablePortIsRefused: the check that is left is the one that catches a typo
+// before the listener does, and says so at startup rather than in a stack trace.
+func TestAddrWithoutAUsablePortIsRefused(t *testing.T) {
+	t.Parallel()
+
+	for _, addr := range []string{"8080", ":0", ":notaport", ":99999", ""} {
 		if _, err := bootstrap.ApplyFlagOverrides(bootstrap.DefaultConfig(),
 			map[string]bool{"addr": true}, bootstrap.FlagOverrides{Addr: addr}); err == nil {
 			t.Errorf("-addr %q was accepted", addr)
@@ -242,31 +258,4 @@ func writeConfig(t *testing.T, body string) string {
 		t.Fatalf("cannot write the test configuration: %v", err)
 	}
 	return path
-}
-
-// inEmptyDir moves the process into a directory with no tallox.yaml, so that the search path
-// finds nothing.
-func inEmptyDir(t *testing.T) {
-	t.Helper()
-	inDir(t, t.TempDir())
-}
-
-// inDir moves the process into dir for the duration of the test.
-//
-// The working directory is process-wide, so the tests that use this must not run alongside
-// each other. They are marked with t.Parallel() like everything else in this file and are
-// nevertheless safe, because Go runs parallel tests of the same package concurrently only
-// after the sequential part finishes — and these two do nothing but read a configuration
-// under a directory they own. If a third one ever appears, they need a shared mutex rather
-// than a third copy of this comment.
-func inDir(t *testing.T, dir string) {
-	t.Helper()
-	before, err := os.Getwd()
-	if err != nil {
-		t.Fatalf("cannot read the working directory: %v", err)
-	}
-	if err := os.Chdir(dir); err != nil {
-		t.Fatalf("cannot change directory: %v", err)
-	}
-	t.Cleanup(func() { _ = os.Chdir(before) })
 }

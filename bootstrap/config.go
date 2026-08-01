@@ -35,10 +35,19 @@ type Config struct {
 
 // ServerConfig is the HTTP surface.
 type ServerConfig struct {
-	// Port is what the server listens on. A number rather than an address, because the
-	// listen interface is not something this deployment varies: the container publishes
-	// nothing and Caddy reaches it by service name.
+	// Port is what the server listens on. A number rather than an address, because in the
+	// configuration file the interface is not something worth varying: the container
+	// publishes nothing and Caddy reaches it by service name.
+	//
+	// The -addr flag still takes a full address and wins over this — see listen.
 	Port int
+	// listen is the full address -addr asked for, empty when nobody asked.
+	//
+	// Unexported, so it exists only as a flag override and never as a configuration key: two
+	// ways to say where the server listens is one too many, and the file is the one that
+	// should read well. viper cannot set it, so `server.listen` in a YAML file is an unknown
+	// key and fails the start, which is the right answer.
+	listen string
 	// Playground serves the built-in GraphQL playground at "/". Off in production — the
 	// explorer colleagues use is /api-doku in tallox.gui, and exactly one explorer is the
 	// point.
@@ -119,6 +128,17 @@ func DefaultConfig() Config {
 // can say which file the running configuration came from. "Which tallox.yaml is this
 // container actually using" is a question asked while standing in front of production.
 func LoadConfig(explicitPath string) (Config, string, error) {
+	return LoadConfigFrom(explicitPath, ".", "$HOME")
+}
+
+// LoadConfigFrom is LoadConfig with the search path spelled out.
+//
+// Exported for the tests, which need to point the search somewhere they control. The
+// alternative — chdir into a temporary directory — reaches outside the test that does it: the
+// working directory is process-wide, every test in this package runs in parallel, and
+// TestTheDevLoopAsksForDevMode reads ../gowatch.yml relative to it. That test went red for a
+// reason that had nothing to do with it, which is the worst kind of flake to be handed.
+func LoadConfigFrom(explicitPath string, searchPaths ...string) (Config, string, error) {
 	v := viper.New()
 
 	if explicitPath != "" {
@@ -137,8 +157,9 @@ func LoadConfig(explicitPath string) (Config, string, error) {
 		// The same trap is in the repository root, where `go build` leaves ./tallox next to
 		// the source.
 		v.SetConfigName(ConfigName)
-		v.AddConfigPath(".")
-		v.AddConfigPath("$HOME")
+		for _, path := range searchPaths {
+			v.AddConfigPath(path)
+		}
 	}
 
 	cfg := DefaultConfig()
@@ -188,11 +209,10 @@ type FlagOverrides struct {
 // Pure, and exported for the test that asserts precedence in both directions.
 func ApplyFlagOverrides(cfg Config, set map[string]bool, f FlagOverrides) (Config, error) {
 	if set["addr"] {
-		port, err := portFromAddr(f.Addr)
-		if err != nil {
+		if err := validateAddr(f.Addr); err != nil {
 			return Config{}, err
 		}
-		cfg.Server.Port = port
+		cfg.Server.listen = f.Addr
 	}
 	if set["playground"] {
 		cfg.Server.Playground = f.Playground
@@ -211,26 +231,26 @@ func ApplyFlagOverrides(cfg Config, set map[string]bool, f FlagOverrides) (Confi
 	return cfg, nil
 }
 
-// portFromAddr reads the port out of a listen address, so that -addr keeps working against a
-// configuration file that speaks in ports.
+// validateAddr checks that -addr is something net/http can listen on.
 //
-// Only the port, because that is all ServerConfig carries — see its comment. A -addr that
-// names a host is refused rather than quietly ignored: silently dropping the host would make
-// `-addr=127.0.0.1:8080` mean something other than what it says.
-func portFromAddr(addr string) (int, error) {
-	host, port, found := strings.Cut(addr, ":")
+// The host part is kept, not refused. An earlier version rejected it on the grounds that this
+// server always listens on all interfaces and is reached through a reverse proxy — which is
+// true of production and of nothing else. `-addr 127.0.0.1:8080` is what the end-to-end
+// workflow uses to keep its throwaway backend off the runner's network, and that is a
+// perfectly good reason to name a host. Refusing it broke a job that had worked for weeks.
+//
+// The check that remains is the one that catches a typo before the listener does: an address
+// with no port at all, or with one nothing can bind.
+func validateAddr(addr string) error {
+	_, port, found := strings.Cut(addr, ":")
 	if !found {
-		return 0, fmt.Errorf("-addr %q has no port", addr)
-	}
-	if host != "" {
-		return 0, fmt.Errorf("-addr %q names a host; this server always listens on all "+
-			"interfaces and is reached through the reverse proxy", addr)
+		return fmt.Errorf("-addr %q has no port", addr)
 	}
 	var n int
 	if _, err := fmt.Sscanf(port, "%d", &n); err != nil || n <= 0 || n > 65535 {
-		return 0, fmt.Errorf("-addr %q has no usable port", addr)
+		return fmt.Errorf("-addr %q has no usable port", addr)
 	}
-	return n, nil
+	return nil
 }
 
 // FlagsSet reports which flags were given on the command line.
@@ -244,4 +264,12 @@ func FlagsSet() map[string]bool {
 }
 
 // Addr renders the listen address the HTTP server binds.
-func (c ServerConfig) Addr() string { return fmt.Sprintf(":%d", c.Port) }
+//
+// The -addr flag wins whole, rather than being reduced to its port: it is the only way to say
+// "listen on loopback only", and that is a thing tests and one-off runs legitimately want.
+func (c ServerConfig) Addr() string {
+	if c.listen != "" {
+		return c.listen
+	}
+	return fmt.Sprintf(":%d", c.Port)
+}
