@@ -61,7 +61,7 @@ internal/buildinfo/        the ldflags version stamp. Shared by main, /healthz a
 internal/principal/        the authenticated Actor in the context. stdlib + uuid only.
 internal/auth/             two authenticators, one middleware, the PAT format
 internal/policy/           visibility and phase rules. Pure: no DB, no HTTP, no GraphQL.
-internal/domain/           business logic
+internal/domain/           business logic — token lifetimes, validation. No I/O of its own.
 internal/store/            the ONLY owner of pgxpool. sqlc-generated queries.
 internal/store/storetest/  integration harness: a migrated schema per test
 db/                        embedded SQL assets (db.Migrations)
@@ -148,7 +148,15 @@ Two things the sibling project's equivalent gets wrong, which must not be repeat
 
 A real gqlgen field directive, so *generated* code calls it and no resolver can forget it. On
 nullable fields it returns `null` rather than erroring the whole operation, so scripts stay
-useful and the schema documents the boundary itself.
+useful and the schema documents the boundary itself. Implemented in `graph/directives.go`,
+decided in `policy.MayReadInteractiveOnly`, wired in `bootstrap` — gqlgen fails closed on a
+directive with no implementation, so forgetting the wiring breaks the field loudly rather
+than serving it.
+
+Refusals travel as `*gqlerror.Error` with an `extensions.code` (`INTERACTIVE_ONLY`,
+`TOKEN_NOT_FOUND`, …). The GUI branches on the code; the German sentence is the part that
+gets reworded, and matching prose across a repository boundary breaks the first time somebody
+improves a message.
 
 Not reachable via token: the Deputat/overtime traffic light (personnel data), unpublished
 wishes of other people, free-text notes about people, **token management itself** (otherwise a

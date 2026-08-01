@@ -1,0 +1,27 @@
+"""
+Not reachable with a Personal Access Token.
+
+A long-lived token in a script is a different risk class from an audited interactive session:
+it enables silent bulk export, and it decouples "who saw this" from any login event. The
+fields behind this directive are the ones where that difference matters — personnel data, the
+unpublished wishes of other people, free-text notes, the audit log, and token management
+itself, because a leaked token that can mint its successors outlives its own expiry date.
+
+Two properties are deliberate.
+
+It is a real directive rather than a check inside each resolver, so that *generated* code
+calls it and no resolver can forget it. A rule that depends on every future author
+remembering it is not a rule.
+
+On a **nullable** field it answers `null` instead of failing the operation. A colleague's
+evaluation script asking for a person and their tokens should get the person, not an error
+page — and the schema then documents the boundary itself, because the field is visibly
+nullable. On a non-null field, and on every mutation, it refuses outright: a write that
+silently does nothing is worse than a write that says no.
+"""
+directive @interactiveOnly on FIELD_DEFINITION
+
+"""
+An instant in time, RFC 3339.
+"""
+scalar Time

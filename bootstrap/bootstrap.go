@@ -28,6 +28,7 @@ import (
 	"github.com/obcode/tallox.go/graph/generated"
 	"github.com/obcode/tallox.go/internal/auth"
 	"github.com/obcode/tallox.go/internal/buildinfo"
+	"github.com/obcode/tallox.go/internal/domain"
 	"github.com/obcode/tallox.go/internal/store"
 )
 
@@ -48,6 +49,9 @@ type Options struct {
 	Playground bool
 	// Auth configures both doors: the mode, and the two lookups.
 	Auth auth.Config
+	// Tokens is token management. Nil is legitimate for the tests that never reach a token
+	// field; a request that does reach one then fails loudly rather than answering wrongly.
+	Tokens *domain.TokenService
 }
 
 // Serve parses flags, sets up logging and runs the HTTP server until a signal arrives.
@@ -149,6 +153,7 @@ func Serve(build buildinfo.Info) {
 	defer pool.Close()
 
 	directory := store.NewDirectory(pool)
+	tokens := domain.NewTokenService(store.NewTokens(pool), nil)
 
 	srv := &http.Server{
 		Addr: *addr,
@@ -161,6 +166,7 @@ func Serve(build buildinfo.Info) {
 				Tokens:  directory,
 				DevUser: *devUser,
 			},
+			Tokens: tokens,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -226,7 +232,7 @@ func router(opts Options) http.Handler {
 	// X-Remote-User, /api/graphql from a bearer token — but they share a schema, a resolver
 	// root and an AroundOperations chain, so a rule added for the browser cannot be missing
 	// on the token path. What differs is the authenticating middleware, and only that.
-	gql := graphqlHandler(opts.Build)
+	gql := graphqlHandler(opts)
 
 	r.With(auth.Middleware(auth.NewProxyAuthenticator(opts.Auth))).Handle("/query", gql)
 
@@ -249,9 +255,14 @@ func router(opts Options) http.Handler {
 // graphqlHandler builds the gqlgen server. Transports are listed explicitly rather than
 // taken from NewDefaultServer: the default set includes websockets, and a subscription
 // transport that nobody has thought about is an auth path that nobody has thought about.
-func graphqlHandler(build buildinfo.Info) http.Handler {
+func graphqlHandler(opts Options) http.Handler {
 	srv := handler.New(generated.NewExecutableSchema(generated.Config{
-		Resolvers: &graph.Resolver{Build: build},
+		Resolvers: &graph.Resolver{Build: opts.Build, Tokens: opts.Tokens},
+		// The generated code fails closed on a directive with no implementation — the field
+		// errors with "directive interactiveOnly is not implemented" rather than passing
+		// through. So forgetting this line breaks token management loudly instead of
+		// serving it to scripts, which is the direction one wants to be wrong in.
+		Directives: graph.Directives(),
 	}))
 
 	srv.AddTransport(transport.Options{})

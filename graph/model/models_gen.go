@@ -3,8 +3,24 @@
 package model
 
 import (
+	"time"
+
 	"github.com/obcode/tallox.go/internal/policy"
 )
+
+// A freshly created token: the record, plus the one and only sight of the secret.
+type CreatedPersonalAccessToken struct {
+	Token *PersonalAccessToken `json:"token"`
+	// The complete token, `tallox_<id>_<secret>`.
+	//
+	// Shown once, here, and never again — the server keeps a hash. Anybody who loses it creates a
+	// new one and revokes this one, which is a two-second inconvenience and the reason a database
+	// leak is not a credential leak.
+	Secret string `json:"secret"`
+}
+
+type Mutation struct {
+}
 
 // A person in the planning.
 //
@@ -19,6 +35,35 @@ type Person struct {
 	Name string `json:"name"`
 	// The grants this person holds, in a stable order.
 	Roles []policy.Role `json:"roles"`
+}
+
+// A Personal Access Token, as its owner sees it.
+//
+// The secret is not here and never will be: it exists in memory once, when the token is
+// created, and only its SHA-256 hash is stored. A field that could return it would make every
+// list of tokens a list of credentials.
+type PersonalAccessToken struct {
+	// The public half of the token — the part between the two underscores in `tallox_…_…`.
+	//
+	// Safe to show, safe to log, safe to read out over the phone. It is what the audit log
+	// records, which is why revoking a token sets a timestamp instead of deleting the row.
+	ID string `json:"id"`
+	// What the owner called it. Shown in the list so that revoking the right one is not guesswork.
+	Description string `json:"description"`
+	// The area:verb grants carried by this token. Enforcement arrives with the `@scope` directive.
+	Scopes    []string  `json:"scopes"`
+	CreatedAt time.Time `json:"createdAt"`
+	// There is no such thing as a token that does not expire. 90 days by default, 365 at most.
+	ExpiresAt time.Time `json:"expiresAt"`
+	// Roughly when this token was last used, or `null` if it never was.
+	//
+	// Deliberately coarse — it is only written when the previous value is more than five minutes
+	// old, because a row lock and a WAL write per API call would make the busiest token the
+	// slowest one. It answers "is this still in use, can I revoke it", which coarse resolution
+	// answers as well as exact resolution would.
+	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
+	// When it was withdrawn, or `null` while it still works.
+	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
 type Query struct {

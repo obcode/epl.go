@@ -40,7 +40,10 @@ A token can never do more than its owner. Personnel data (the Deputat/overtime t
 other people's unpublished wishes, and token management itself are not reachable with a token
 at all.
 
-Create a token in the web UI under `/account/tokens`; the plaintext is shown once.
+Create a token with the `createPersonalAccessToken` mutation — through the browser door, not
+with a token: token management is `@interactiveOnly`, so a leaked token cannot mint its
+successors. The plaintext comes back once and is never stored; the server keeps a SHA-256.
+Default lifetime 90 days, 365 at most. The web UI for this is not built yet.
 
 ```console
 $ curl -sS https://<host>/api/graphql \

@@ -150,6 +150,56 @@ func (q *Queries) RevokeToken(ctx context.Context, tokenID string) error {
 	return err
 }
 
+const revokeTokenOfOwner = `-- name: RevokeTokenOfOwner :one
+UPDATE personal_access_token
+SET revoked_at = COALESCE(revoked_at, now())
+WHERE token_id = $1 AND owner_id = $2
+RETURNING token_id, owner_id, description, scopes, created_at, expires_at,
+          last_used_at, revoked_at
+`
+
+type RevokeTokenOfOwnerParams struct {
+	TokenID string
+	OwnerID uuid.UUID
+}
+
+type RevokeTokenOfOwnerRow struct {
+	TokenID     string
+	OwnerID     uuid.UUID
+	Description string
+	Scopes      []string
+	CreatedAt   time.Time
+	ExpiresAt   time.Time
+	LastUsedAt  pgtype.Timestamptz
+	RevokedAt   pgtype.Timestamptz
+}
+
+// Revokes a token, but only the caller's own.
+//
+// Ownership is in the WHERE clause rather than in a read-then-write in Go, which collapses
+// three things into one: the check cannot race with a concurrent revocation, "no such token"
+// and "not your token" become the same empty result — the difference is not information the
+// caller is entitled to — and there is no window in which a token id has been confirmed to
+// exist before the write is refused.
+//
+// COALESCE keeps the first revocation moment. Revoking twice is not an error, and the moment
+// the audit log needs is the first one.
+func (q *Queries) RevokeTokenOfOwner(ctx context.Context, arg RevokeTokenOfOwnerParams) (RevokeTokenOfOwnerRow, error) {
+	row := q.db.QueryRow(ctx, revokeTokenOfOwner, arg.TokenID, arg.OwnerID)
+	var i RevokeTokenOfOwnerRow
+	err := row.Scan(
+		&i.TokenID,
+		&i.OwnerID,
+		&i.Description,
+		&i.Scopes,
+		&i.CreatedAt,
+		&i.ExpiresAt,
+		&i.LastUsedAt,
+		&i.RevokedAt,
+	)
+	return i, err
+}
+
 const tokenByID = `-- name: TokenByID :one
 SELECT
     t.token_id,

@@ -70,3 +70,20 @@ WHERE token_id = $1
 UPDATE personal_access_token
 SET revoked_at = now()
 WHERE token_id = $1 AND revoked_at IS NULL;
+
+-- name: RevokeTokenOfOwner :one
+-- Revokes a token, but only the caller's own.
+--
+-- Ownership is in the WHERE clause rather than in a read-then-write in Go, which collapses
+-- three things into one: the check cannot race with a concurrent revocation, "no such token"
+-- and "not your token" become the same empty result — the difference is not information the
+-- caller is entitled to — and there is no window in which a token id has been confirmed to
+-- exist before the write is refused.
+--
+-- COALESCE keeps the first revocation moment. Revoking twice is not an error, and the moment
+-- the audit log needs is the first one.
+UPDATE personal_access_token
+SET revoked_at = COALESCE(revoked_at, now())
+WHERE token_id = $1 AND owner_id = $2
+RETURNING token_id, owner_id, description, scopes, created_at, expires_at,
+          last_used_at, revoked_at;

@@ -49,3 +49,7 @@ models:
   # two are compared by tests (graph and internal/store).
   Role:
     model: github.com/obcode/tallox.go/internal/policy.Role
+  # Timestamps travel as RFC 3339 strings. gqlgen's Time scalar does the marshalling, so
+  # nothing in the domain has to know about the wire format.
+  Time:
+    model: github.com/99designs/gqlgen/graphql.Time
