@@ -425,3 +425,62 @@ func TestUnknownGrantsNeverReachTheClient(t *testing.T) {
 		t.Errorf("roles are %v — an unrecognised grant reached the client", got.Me.Roles)
 	}
 }
+
+// TestAnExpiredGrantLapsesOnBothDoors.
+//
+// A grant with an expiry is how an administrator who genuinely has to look at something
+// grants themselves DEANS_OFFICE — visibly, and for an hour. The threshold only works if
+// stepping back over it costs nobody anything, which means the expiry has to end the grant on
+// every route in and not only in the browser.
+//
+// It did not, for a while: the two doors resolve roles through different queries, and the
+// filter that arrived with person_role.expires_at reached only one of them. EachDoor is what
+// makes that a red test rather than something noticed in a token's answer in February.
+func TestAnExpiredGrantLapsesOnBothDoors(t *testing.T) {
+	t.Parallel()
+
+	s := storetest.New(t)
+	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleLecturer))
+
+	parsed, err := auth.ParseToken(testdata.Eins.Token)
+	if err != nil {
+		t.Fatalf("fixture token does not parse: %v", err)
+	}
+	storetest.SeedToken(t, s, testdata.Eins, auth.HashSecret(parsed.Secret), storetest.TokenOptions{})
+
+	// Granted two hours ago, ran out an hour ago — a grant that was real and is over, which is
+	// the state the column exists to represent.
+	if _, err := s.Pool.Exec(t.Context(),
+		`INSERT INTO person_role (person_id, role, granted_at, expires_at)
+		 VALUES ($1, 'DEANS_OFFICE', now() - interval '2 hours', now() - interval '1 hour')`,
+		testdata.Eins.ID()); err != nil {
+		t.Fatalf("cannot seed the expired grant: %v", err)
+	}
+
+	directory := store.NewDirectory(s.Pool)
+	h := bootstrap.Handler(bootstrap.Options{
+		Build: buildinfo.Info{Version: "test"},
+		Auth:  auth.Config{Mode: auth.ModeProxy, Users: directory, Tokens: directory},
+	})
+
+	graphqltest.EachDoor(t, h, testdata.Eins.Mail, testdata.Eins.Token,
+		func(t *testing.T, c *graphqltest.Client) {
+			var got meResponse
+			c.MustQuery(t, meQuery, nil, &got)
+
+			if got.Me == nil {
+				t.Fatal("a valid credential resolved to nobody")
+			}
+			for _, r := range got.Me.Roles {
+				if r == string(policy.RoleDeansOffice) {
+					t.Errorf("roles are %v — an expired DEANS_OFFICE grant is still in "+
+						"force on the %s door", got.Me.Roles, c.Door().Name)
+				}
+			}
+			// The live grant has to survive: an expiry filter that also drops unexpiring
+			// grants would lock everybody out instead of letting one grant lapse.
+			if len(got.Me.Roles) != 1 || got.Me.Roles[0] != string(policy.RoleLecturer) {
+				t.Errorf("roles are %v, want only the unexpiring LECTURER grant", got.Me.Roles)
+			}
+		})
+}

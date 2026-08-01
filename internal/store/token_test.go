@@ -291,3 +291,51 @@ func TestPeopleWithTokensCannotBeDeleted(t *testing.T) {
 			"leaver's script keep working")
 	}
 }
+
+// TestAnExpiredGrantDoesNotReachTheTokenDoor.
+//
+// The same rule as TestAnExpiredGrantIsInvisibleToTheLookupsButNotToTheAuditView, asserted on
+// the other authentication query — because for a while it only held on one of them. The
+// expiry filter arrived with the migration that added person_role.expires_at, person.sql got
+// it, and this query did not: an expired DEANS_OFFICE grant kept taking effect through the
+// token door long after the browser door had let it lapse.
+//
+// That is the exact grant the expiry exists for. An administrator who has to look at
+// something grants themselves DEANS_OFFICE for an hour, visibly; the mechanism only works if
+// stepping back over the threshold happens by itself, on every route in.
+//
+// It is also a reminder that graphqltest.EachDoor cannot catch this one on its own: the two
+// doors resolve roles through *different* queries, so the assertion has to exist here too.
+func TestAnExpiredGrantDoesNotReachTheTokenDoor(t *testing.T) {
+	t.Parallel()
+
+	s := storetest.New(t)
+	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleLecturer))
+	storetest.SeedToken(t, s, testdata.Eins, hash(9), storetest.TokenOptions{})
+
+	if _, err := s.Pool.Exec(t.Context(),
+		`INSERT INTO person_role (person_id, role, granted_at, expires_at)
+		 VALUES ($1, 'DEANS_OFFICE', now() - interval '2 hours', now() - interval '1 hour')`,
+		testdata.Eins.ID()); err != nil {
+		t.Fatalf("cannot seed the expired grant: %v", err)
+	}
+
+	got, err := s.Queries().TokenByID(t.Context(), testdata.Eins.TokenID)
+	if err != nil {
+		t.Fatalf("cannot read the token: %v", err)
+	}
+
+	for _, r := range got.Roles {
+		if r == string(policy.RoleDeansOffice) {
+			t.Error("an expired DEANS_OFFICE grant still reaches the token door — a script " +
+				"would keep reading on a permission the database considers over")
+		}
+	}
+
+	// The live grant has to survive the filter. A LEFT JOIN whose condition moved into a
+	// WHERE clause would drop this row entirely, and the token would authenticate as nobody.
+	if !hasRoleString(got.Roles, string(policy.RoleLecturer)) {
+		t.Errorf("roles are %v — the live grant was filtered out with the expired one",
+			got.Roles)
+	}
+}

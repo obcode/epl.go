@@ -18,11 +18,18 @@ RETURNING token_id, owner_id, description, scopes, created_at, expires_at,
 -- exceed its owner's role" true by construction — revoking a role demotes every token that
 -- person holds without touching a token row.
 --
--- Deliberately returns expired, revoked and inactive rows instead of filtering them out.
+-- Deliberately returns expired, revoked and inactive *tokens* instead of filtering them out.
 -- Authentication has to tell "this token does not exist" from "this token expired" — the
 -- caller owns the token and can be told why it stopped working — and a query that filters
 -- would collapse both into the same silence. It also keeps the timing of the two cases
 -- similar, which a WHERE clause on revoked_at would not.
+--
+-- Expired *grants* are the opposite case and are filtered, exactly as in person.sql. The
+-- distinction is who is being told what: the token's owner may learn why their credential
+-- stopped working, but a grant the database considers over must not still take effect. The
+-- filter belongs in the JOIN condition rather than a WHERE clause for the reason set out
+-- there — a WHERE on the right-hand table of a LEFT JOIN makes it an inner one, which would
+-- turn "this person has no live roles" into "this token does not exist".
 SELECT
     t.token_id,
     t.owner_id,
@@ -39,7 +46,9 @@ SELECT
     )::text[] AS roles
 FROM personal_access_token t
 JOIN person p ON p.id = t.owner_id
-LEFT JOIN person_role pr ON pr.person_id = p.id
+LEFT JOIN person_role pr
+    ON pr.person_id = p.id
+   AND (pr.expires_at IS NULL OR pr.expires_at > now())
 WHERE t.token_id = $1
 GROUP BY t.token_id, p.id;
 
