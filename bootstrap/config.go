@@ -1,0 +1,236 @@
+package bootstrap
+
+import (
+	"errors"
+	"flag"
+	"fmt"
+	"strings"
+
+	"github.com/spf13/viper"
+)
+
+// ConfigName is the base name of the configuration file, without extension. Searched in the
+// working directory and in $HOME, which is where a container mount and a developer's home
+// respectively put it.
+const ConfigName = "tallox"
+
+// Config is everything tallox.yaml can say.
+//
+// Every field here is read by something. That is a rule rather than an observation: a key
+// that a file documents and the program ignores is worse than no key at all, because somebody
+// eventually sets it, restarts, and believes the restart did what the comment promised. The
+// blocks that are planned but not wired — ZPA, SMTP — are commented out in
+// deploy/tallox.yaml.example instead of being declared here, so the shape stays documented
+// without the file being able to lie.
+//
+// The corollary is UnmarshalExact below: a key this struct does not know is a startup
+// failure, not a shrug. A typo in a production configuration file has to be loud on the
+// restart that introduces it, and the alternative — silently keeping the default — is a
+// mode where the server runs and the operator is wrong about what it is doing.
+type Config struct {
+	Server ServerConfig
+	Auth   AuthConfig
+	Log    LogConfig
+}
+
+// ServerConfig is the HTTP surface.
+type ServerConfig struct {
+	// Port is what the server listens on. A number rather than an address, because the
+	// listen interface is not something this deployment varies: the container publishes
+	// nothing and Caddy reaches it by service name.
+	Port int
+	// Playground serves the built-in GraphQL playground at "/". Off in production — the
+	// explorer colleagues use is /api-doku in tallox.gui, and exactly one explorer is the
+	// point.
+	Playground bool
+	// Introspection stays on, in production too. It is not a user interface: it is what makes
+	// editor completion, codegen and schema exploration work for the colleagues writing their
+	// own evaluations. See CLAUDE.md — the API is a product here.
+	Introspection bool
+}
+
+// AuthConfig configures both doors, and the way back in when the database says otherwise.
+type AuthConfig struct {
+	// Mode is dev, proxy or off-token. Validated by auth.ParseMode.
+	Mode string
+	// DevUser is the mail address of the injected development user. Only read in dev mode.
+	DevUser string
+	// ProtectedAdmins is the list of people who must be able to administer this installation,
+	// whatever the database currently says.
+	//
+	// Reconciled at every start, additively: a listed person is created if missing,
+	// reactivated if deactivated, and granted ADMIN if they lack it. Nobody is ever demoted
+	// by this list — editing the file is not a way to revoke anything, because a list that
+	// could revoke would turn a careless edit into a silent mass demotion.
+	//
+	// It is the answer to the failure mode this project actually has: one administrator
+	// removing another by accident, on an installation that is only reachable through a VPN
+	// and whose only other repair is psql on the host.
+	ProtectedAdmins []ProtectedAdmin
+}
+
+// ProtectedAdmin is one entry of that list.
+type ProtectedAdmin struct {
+	// Mail is the identity the proxy asserts in X-Remote-User — the same string that would be
+	// typed into the user administration, not a local login name.
+	Mail string
+	// Name is what the interface shows. Optional: an empty name is filled in with the mail
+	// address, exactly as it is for a person created through the GUI before the ZPA import
+	// has run.
+	Name string
+}
+
+// LogConfig is the logging level, as a word rather than a boolean pair.
+type LogConfig struct {
+	// Level is debug, info, warn or error.
+	Level string
+}
+
+// DefaultConfig is what a server with no configuration file runs as.
+//
+// It is production, deliberately, and it is the same set of values the flags default to. A
+// server that falls back to something more convenient when nobody configured it is a server
+// that hands out an administrator on the day somebody forgets a file.
+func DefaultConfig() Config {
+	return Config{
+		Server: ServerConfig{
+			Port:          8080,
+			Playground:    true,
+			Introspection: true,
+		},
+		Auth: AuthConfig{
+			Mode:    "proxy",
+			DevUser: "",
+		},
+		Log: LogConfig{
+			Level: "info",
+		},
+	}
+}
+
+// LoadConfig reads tallox.yaml, falling back to DefaultConfig where it is silent.
+//
+// An explicit path that does not exist is an error: somebody asked for that file. A missing
+// file at the searched locations is not — the development loop runs entirely on flags, and a
+// server that refuses to start without a configuration file would make the first `go run .`
+// of every new checkout a support question.
+//
+// Returns the path that was read, or the empty string when none was, so that the startup log
+// can say which file the running configuration came from. "Which tallox.yaml is this
+// container actually using" is a question asked while standing in front of production.
+func LoadConfig(explicitPath string) (Config, string, error) {
+	v := viper.New()
+	v.SetConfigType("yaml")
+
+	if explicitPath != "" {
+		v.SetConfigFile(explicitPath)
+	} else {
+		v.SetConfigName(ConfigName)
+		v.AddConfigPath(".")
+		v.AddConfigPath("$HOME")
+	}
+
+	cfg := DefaultConfig()
+
+	if err := v.ReadInConfig(); err != nil {
+		var notFound viper.ConfigFileNotFoundError
+		if errors.As(err, &notFound) && explicitPath == "" {
+			return cfg, "", nil
+		}
+		return Config{}, "", fmt.Errorf("cannot read the configuration file: %w", err)
+	}
+
+	// UnmarshalExact, not Unmarshal: an unknown key fails the start. See the Config doc.
+	//
+	// It unmarshals into the defaults rather than into a zero value, so a file that mentions
+	// only auth.protectedadmins leaves everything else at the documented default instead of
+	// silently setting the port to 0 and the mode to the empty string.
+	if err := v.UnmarshalExact(&cfg); err != nil {
+		return Config{}, "", fmt.Errorf("cannot read %s: %w", v.ConfigFileUsed(), err)
+	}
+
+	return cfg, v.ConfigFileUsed(), nil
+}
+
+// FlagOverrides are the flag values that can override the file, and the names under which
+// they were declared.
+//
+// A struct rather than a long parameter list, for the reason Options is one: this grows with
+// every knob, and two adjacent strings that mean different things are a bug waiting for a
+// hurried afternoon.
+type FlagOverrides struct {
+	Addr       string
+	Playground bool
+	AuthMode   string
+	DevUser    string
+	Verbose    bool
+}
+
+// ApplyFlagOverrides lets explicitly-set flags win over the configuration file.
+//
+// The distinction that makes this correct is `set` — the names of the flags the caller
+// actually typed, from flag.Visit. Without it there is no way to tell `-playground=false`
+// from "the flag defaulted to false", so a flag default would silently override every value
+// in the file and the file would be decorative. This is the usual way a configuration layer
+// is wrong, and it is invisible until somebody sets a value that happens to equal a default.
+//
+// Pure, and exported for the test that asserts precedence in both directions.
+func ApplyFlagOverrides(cfg Config, set map[string]bool, f FlagOverrides) (Config, error) {
+	if set["addr"] {
+		port, err := portFromAddr(f.Addr)
+		if err != nil {
+			return Config{}, err
+		}
+		cfg.Server.Port = port
+	}
+	if set["playground"] {
+		cfg.Server.Playground = f.Playground
+	}
+	if set["auth-mode"] {
+		cfg.Auth.Mode = f.AuthMode
+	}
+	if set["auth-dev-user"] {
+		cfg.Auth.DevUser = f.DevUser
+	}
+	if set["v"] && f.Verbose {
+		// -v is a switch, not a level: it means "show me everything" and there is no
+		// `-v=false` that could mean "be quieter than the file says".
+		cfg.Log.Level = "debug"
+	}
+	return cfg, nil
+}
+
+// portFromAddr reads the port out of a listen address, so that -addr keeps working against a
+// configuration file that speaks in ports.
+//
+// Only the port, because that is all ServerConfig carries — see its comment. A -addr that
+// names a host is refused rather than quietly ignored: silently dropping the host would make
+// `-addr=127.0.0.1:8080` mean something other than what it says.
+func portFromAddr(addr string) (int, error) {
+	host, port, found := strings.Cut(addr, ":")
+	if !found {
+		return 0, fmt.Errorf("-addr %q has no port", addr)
+	}
+	if host != "" {
+		return 0, fmt.Errorf("-addr %q names a host; this server always listens on all "+
+			"interfaces and is reached through the reverse proxy", addr)
+	}
+	var n int
+	if _, err := fmt.Sscanf(port, "%d", &n); err != nil || n <= 0 || n > 65535 {
+		return 0, fmt.Errorf("-addr %q has no usable port", addr)
+	}
+	return n, nil
+}
+
+// FlagsSet reports which flags were given on the command line.
+//
+// flag.Visit walks only the flags that were actually set, which is the whole basis of the
+// precedence rule above.
+func FlagsSet() map[string]bool {
+	set := make(map[string]bool)
+	flag.Visit(func(f *flag.Flag) { set[f.Name] = true })
+	return set
+}
+
+// Addr renders the listen address the HTTP server binds.
+func (c ServerConfig) Addr() string { return fmt.Sprintf(":%d", c.Port) }

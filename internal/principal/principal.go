@@ -75,8 +75,21 @@ type Actor struct {
 	Mail string
 	// Name is for rendering and for log lines.
 	Name string
-	// Roles are the grants as stored, uninterpreted. See the package doc.
+	// Roles are the grants this request is judged by, uninterpreted. See the package doc.
+	//
+	// Ordinarily these are the grants as stored. When the caller asked to be narrowed — the
+	// "look at this as a lecturer" feature — they are a subset of them, and NarrowedFrom
+	// holds what was stored. Rules read this field and nothing else, so narrowing applies to
+	// every rule automatically rather than to the ones somebody remembered.
 	Roles []string
+	// NarrowedFrom holds the grants as stored, when and only when this actor was narrowed.
+	// nil otherwise.
+	//
+	// It exists for two consumers and no rule: the interface, which has to say that what you
+	// are looking at is not your own view, and the audit log, which has to record that an
+	// action was taken while narrowed. A rule that consulted it would be undoing the
+	// narrowing it is supposed to respect.
+	NarrowedFrom []string
 	// Scopes are the area:verb grants of the Personal Access Token used, empty for an
 	// interactive session (where the role alone bounds what is allowed). Enforcement is
 	// schema-driven and arrives with the @scope directive; the field exists now so the
@@ -111,6 +124,13 @@ func (a Actor) Authenticated() bool { return a.ID != uuid.Nil }
 // A plain accessor, not a rule: what interactivity *permits* is a question for
 // internal/policy.
 func (a Actor) Interactive() bool { return a.Kind == KindInteractive }
+
+// Narrowed reports whether this actor asked to be judged by fewer roles than they hold.
+//
+// A plain accessor like Interactive, and for the same reason: what narrowing *means* is a
+// question for internal/policy, which is also the only package that produces the state. This
+// exists so the interface can show a banner and the log can carry a field.
+func (a Actor) Narrowed() bool { return a.NarrowedFrom != nil }
 
 // Owns reports whether the given owner reference is this actor.
 //

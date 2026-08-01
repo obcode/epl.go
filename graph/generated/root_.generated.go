@@ -7,8 +7,10 @@ import (
 	"context"
 	"fmt"
 	"sync/atomic"
+	"time"
 
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/obcode/tallox.go/internal/policy"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -30,6 +32,13 @@ type DirectiveRoot struct {
 }
 
 type ComplexityRoot struct {
+	AccessDiagnosis struct {
+		Active    func(childComplexity int) int
+		Decisions func(childComplexity int) int
+		Grants    func(childComplexity int) int
+		Person    func(childComplexity int) int
+	}
+
 	BuildInfo struct {
 		BuiltAt func(childComplexity int) int
 		Commit  func(childComplexity int) int
@@ -42,8 +51,12 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
+		CreatePerson              func(childComplexity int, mail string, name *string) int
 		CreatePersonalAccessToken func(childComplexity int, description string, expiresInDays *int) int
+		RenamePerson              func(childComplexity int, id string, name string) int
 		RevokePersonalAccessToken func(childComplexity int, id string) int
+		SetPersonActive           func(childComplexity int, id string, active bool) int
+		SetPersonRoles            func(childComplexity int, id string, roles []policy.Role, expiresAt *time.Time) int
 	}
 
 	Person struct {
@@ -63,10 +76,36 @@ type ComplexityRoot struct {
 		Scopes      func(childComplexity int) int
 	}
 
+	PolicyDecision struct {
+		Allowed func(childComplexity int) int
+		Reason  func(childComplexity int) int
+		Rule    func(childComplexity int) int
+	}
+
 	Query struct {
-		BuildInfo func(childComplexity int) int
-		Me        func(childComplexity int) int
-		MyTokens  func(childComplexity int) int
+		BuildInfo      func(childComplexity int) int
+		DiagnoseAccess func(childComplexity int, mail string) int
+		Me             func(childComplexity int) int
+		MyTokens       func(childComplexity int) int
+		People         func(childComplexity int, search *string, includeInactive *bool) int
+		Person         func(childComplexity int, id string) int
+		RoleGrants     func(childComplexity int, personID string) int
+		Session        func(childComplexity int) int
+	}
+
+	RoleGrant struct {
+		ExpiresAt func(childComplexity int) int
+		GrantedAt func(childComplexity int) int
+		GrantedBy func(childComplexity int) int
+		Role      func(childComplexity int) int
+	}
+
+	Session struct {
+		EffectiveRoles func(childComplexity int) int
+		GrantedRoles   func(childComplexity int) int
+		Interactive    func(childComplexity int) int
+		Narrowed       func(childComplexity int) int
+		Person         func(childComplexity int) int
 	}
 }
 
@@ -83,6 +122,31 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 	ec := newExecutionContext(nil, e, nil)
 	_ = ec
 	switch typeName + "." + field {
+
+	case "AccessDiagnosis.active":
+		if e.ComplexityRoot.AccessDiagnosis.Active == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AccessDiagnosis.Active(childComplexity), true
+	case "AccessDiagnosis.decisions":
+		if e.ComplexityRoot.AccessDiagnosis.Decisions == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AccessDiagnosis.Decisions(childComplexity), true
+	case "AccessDiagnosis.grants":
+		if e.ComplexityRoot.AccessDiagnosis.Grants == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AccessDiagnosis.Grants(childComplexity), true
+	case "AccessDiagnosis.person":
+		if e.ComplexityRoot.AccessDiagnosis.Person == nil {
+			break
+		}
+
+		return e.ComplexityRoot.AccessDiagnosis.Person(childComplexity), true
 
 	case "BuildInfo.builtAt":
 		if e.ComplexityRoot.BuildInfo.BuiltAt == nil {
@@ -116,6 +180,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.CreatedPersonalAccessToken.Token(childComplexity), true
 
+	case "Mutation.createPerson":
+		if e.ComplexityRoot.Mutation.CreatePerson == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createPerson_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.CreatePerson(childComplexity, args["mail"].(string), args["name"].(*string)), true
 	case "Mutation.createPersonalAccessToken":
 		if e.ComplexityRoot.Mutation.CreatePersonalAccessToken == nil {
 			break
@@ -127,6 +202,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.CreatePersonalAccessToken(childComplexity, args["description"].(string), args["expiresInDays"].(*int)), true
+	case "Mutation.renamePerson":
+		if e.ComplexityRoot.Mutation.RenamePerson == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_renamePerson_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.RenamePerson(childComplexity, args["id"].(string), args["name"].(string)), true
 	case "Mutation.revokePersonalAccessToken":
 		if e.ComplexityRoot.Mutation.RevokePersonalAccessToken == nil {
 			break
@@ -138,6 +224,28 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.RevokePersonalAccessToken(childComplexity, args["id"].(string)), true
+	case "Mutation.setPersonActive":
+		if e.ComplexityRoot.Mutation.SetPersonActive == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_setPersonActive_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.SetPersonActive(childComplexity, args["id"].(string), args["active"].(bool)), true
+	case "Mutation.setPersonRoles":
+		if e.ComplexityRoot.Mutation.SetPersonRoles == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_setPersonRoles_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.SetPersonRoles(childComplexity, args["id"].(string), args["roles"].([]policy.Role), args["expiresAt"].(*time.Time)), true
 
 	case "Person.id":
 		if e.ComplexityRoot.Person.ID == nil {
@@ -207,12 +315,42 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.PersonalAccessToken.Scopes(childComplexity), true
 
+	case "PolicyDecision.allowed":
+		if e.ComplexityRoot.PolicyDecision.Allowed == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PolicyDecision.Allowed(childComplexity), true
+	case "PolicyDecision.reason":
+		if e.ComplexityRoot.PolicyDecision.Reason == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PolicyDecision.Reason(childComplexity), true
+	case "PolicyDecision.rule":
+		if e.ComplexityRoot.PolicyDecision.Rule == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PolicyDecision.Rule(childComplexity), true
+
 	case "Query.buildInfo":
 		if e.ComplexityRoot.Query.BuildInfo == nil {
 			break
 		}
 
 		return e.ComplexityRoot.Query.BuildInfo(childComplexity), true
+	case "Query.diagnoseAccess":
+		if e.ComplexityRoot.Query.DiagnoseAccess == nil {
+			break
+		}
+
+		args, err := ec.field_Query_diagnoseAccess_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.DiagnoseAccess(childComplexity, args["mail"].(string)), true
 
 	case "Query.me":
 		if e.ComplexityRoot.Query.Me == nil {
@@ -226,6 +364,101 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Query.MyTokens(childComplexity), true
+	case "Query.people":
+		if e.ComplexityRoot.Query.People == nil {
+			break
+		}
+
+		args, err := ec.field_Query_people_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.People(childComplexity, args["search"].(*string), args["includeInactive"].(*bool)), true
+	case "Query.person":
+		if e.ComplexityRoot.Query.Person == nil {
+			break
+		}
+
+		args, err := ec.field_Query_person_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.Person(childComplexity, args["id"].(string)), true
+	case "Query.roleGrants":
+		if e.ComplexityRoot.Query.RoleGrants == nil {
+			break
+		}
+
+		args, err := ec.field_Query_roleGrants_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.RoleGrants(childComplexity, args["personId"].(string)), true
+	case "Query.session":
+		if e.ComplexityRoot.Query.Session == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Query.Session(childComplexity), true
+
+	case "RoleGrant.expiresAt":
+		if e.ComplexityRoot.RoleGrant.ExpiresAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.RoleGrant.ExpiresAt(childComplexity), true
+	case "RoleGrant.grantedAt":
+		if e.ComplexityRoot.RoleGrant.GrantedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.RoleGrant.GrantedAt(childComplexity), true
+	case "RoleGrant.grantedBy":
+		if e.ComplexityRoot.RoleGrant.GrantedBy == nil {
+			break
+		}
+
+		return e.ComplexityRoot.RoleGrant.GrantedBy(childComplexity), true
+	case "RoleGrant.role":
+		if e.ComplexityRoot.RoleGrant.Role == nil {
+			break
+		}
+
+		return e.ComplexityRoot.RoleGrant.Role(childComplexity), true
+
+	case "Session.effectiveRoles":
+		if e.ComplexityRoot.Session.EffectiveRoles == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Session.EffectiveRoles(childComplexity), true
+	case "Session.grantedRoles":
+		if e.ComplexityRoot.Session.GrantedRoles == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Session.GrantedRoles(childComplexity), true
+	case "Session.interactive":
+		if e.ComplexityRoot.Session.Interactive == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Session.Interactive(childComplexity), true
+	case "Session.narrowed":
+		if e.ComplexityRoot.Session.Narrowed == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Session.Narrowed(childComplexity), true
+	case "Session.person":
+		if e.ComplexityRoot.Session.Person == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Session.Person(childComplexity), true
 
 	}
 	return 0, false
@@ -309,6 +542,153 @@ func newExecutionContext(
 }
 
 var sources = []*ast.Source{
+	{Name: "../administration.graphqls", Input: `# User administration: who may use this installation, and as what.
+#
+# All of it is @interactiveOnly. Granting somebody a role is precisely the kind of act that
+# must stay tied to a login event — a long-lived token in a script decouples "who did this"
+# from any sign-in, and this is the surface where that would decouple the granting of access
+# itself. The rule is in policy.MayAdministerPeople rather than only in the directive, so that
+# a future export or maintenance command has to ask the same question.
+#
+# There is no deletePerson, and there will not be one. A person row is never removed: the
+# assignments they held stay in the history, the audit log has to keep resolving who did what,
+# and their tokens are referenced with ON DELETE RESTRICT. Deactivating is the removal this
+# system has, and it takes away everything at once, tokens included.
+
+"""
+One role grant, as stored — including one that has already expired.
+
+Deliberately unfiltered, unlike ` + "`" + `Person.roles` + "`" + `. "DEANS_OFFICE, granted on Tuesday by X,
+expired on Wednesday" is the answer to the only question this record gets asked: who could see
+what, and when.
+"""
+type RoleGrant {
+  "The role that was granted."
+  role: Role!
+  "When it was granted. Refreshed when the same grant is re-issued with a new expiry."
+  grantedAt: Time!
+  """
+  Who granted it, or ` + "`" + `null` + "`" + ` for a grant no human decided — the reconciliation of the
+  protected administrators from the configuration file, or a future import.
+  """
+  grantedBy: Person
+  """
+  When it stops taking effect, or ` + "`" + `null` + "`" + ` if it does not expire.
+
+  A grant with a date on it is how somebody steps over a threshold and has the database step
+  back over it for them. The intended use is "let me look at this until this evening", not a
+  way to hold a role for a semester — a grant meant to last that long should be visible as a
+  permanent one rather than as a date nobody rereads.
+  """
+  expiresAt: Time
+}
+
+"""
+Why somebody sees what they see.
+
+Answers with decisions, never with content: it says whether a rule lets this person past, and
+it never reads the thing behind the rule. That is what makes it usable for the ordinary
+support question — "why can my colleague not see this" — without becoming a way around the
+confidentiality it is describing.
+"""
+type AccessDiagnosis {
+  "The person the diagnosis is about."
+  person: Person!
+  "An inactive person fails authentication on both doors, whatever roles they hold."
+  active: Boolean!
+  "Their grants, expired ones included."
+  grants: [RoleGrant!]!
+  "What the rules answer for this person, one entry per rule."
+  decisions: [PolicyDecision!]!
+}
+
+"""
+One rule, and what it answers for this person.
+"""
+type PolicyDecision {
+  "The rule, named as it is named in the source — so that a report can be acted on."
+  rule: String!
+  "What the rule answers for this person right now."
+  allowed: Boolean!
+  "Why, in a sentence somebody without the source in front of them can use."
+  reason: String!
+}
+
+extend type Query {
+  """
+  Everybody this installation knows.
+
+  ` + "`" + `search` + "`" + ` matches a substring of the mail address or the name. ` + "`" + `includeInactive` + "`" + ` brings back
+  the people who have been deactivated; they are hidden by default because the list is
+  otherwise mostly leavers after a few years.
+  """
+  people(search: String, includeInactive: Boolean): [Person!] @interactiveOnly
+
+  "One person, or ` + "`" + `null` + "`" + ` if there is nobody with that id."
+  person(id: ID!): Person @interactiveOnly
+
+  """
+  One person's role grants, expired ones included.
+
+  Separate from ` + "`" + `Person.roles` + "`" + `, which is the set in force right now. The two answer different
+  questions and merging them would lose the one this is for.
+  """
+  roleGrants(personId: ID!): [RoleGrant!] @interactiveOnly
+
+  """
+  Why a given person sees what they see.
+
+  Takes the mail address rather than an id, because the question arrives as "Kollegin X says
+  she cannot see the demand planning" and the address is what the asker has.
+  """
+  diagnoseAccess(mail: String!): AccessDiagnosis @interactiveOnly
+}
+
+extend type Mutation {
+  """
+  Add somebody to this installation.
+
+  The mail address is all that is required, and it is the only thing that has to be right: it
+  is what the login asserts, so it decides whether this person can sign in at all. The name
+  can be filled in later, by them or by an import. Requiring it here would mean finding out
+  how a new colleague spells their first name before their account can exist.
+
+  A new person holds no roles. Even LECTURER is granted explicitly, so that who may do what is
+  a list somebody wrote rather than a default nobody chose.
+  """
+  createPerson(mail: String!, name: String): Person! @interactiveOnly
+
+  "Set somebody's display name."
+  renamePerson(id: ID!, name: String!): Person! @interactiveOnly
+
+  """
+  Bring somebody's roles to exactly this set.
+
+  The whole set rather than add and remove, because that is what the screen shows and because
+  add/remove loses to a race the moment two administrators have the same person open: the
+  second one's stale view of what the first did would decide the outcome.
+
+  ` + "`" + `expiresAt` + "`" + ` applies to the roles being *added*. Roles already held keep their own expiry
+  unless they are re-granted, so re-sending an unchanged set does not silently extend
+  anything.
+
+  Refused with ` + "`" + `LAST_ADMIN` + "`" + ` when it would leave the installation with nobody who can
+  administer it.
+  """
+  setPersonRoles(id: ID!, roles: [Role!]!, expiresAt: Time): Person! @interactiveOnly
+
+  """
+  Activate or deactivate somebody.
+
+  Deactivating is the removal this system has: an inactive person fails authentication on both
+  doors, so it withdraws their tokens in the same moment without touching a token row.
+
+  Refused with ` + "`" + `LAST_ADMIN` + "`" + ` when it would deactivate the last administrator — that is the same
+  refusal as taking their ADMIN away, because it has the same consequence.
+  """
+  setPersonActive(id: ID!, active: Boolean!): Person! @interactiveOnly
+}
+`, BuiltIn: false},
 	{Name: "../directives.graphqls", Input: `# Why a real directive rather than a check inside each resolver: generated code calls it, so
 # no resolver can forget it. A rule that depends on every future author remembering it is not
 # a rule. Implementation in graph/directives.go, decision in policy.MayReadInteractiveOnly.
@@ -438,6 +818,64 @@ type Query {
   buildInfo: BuildInfo!
 }
 `, BuiltIn: false},
+	{Name: "../session.graphqls", Input: `# The difference between "who you are" and "how this request is being judged".
+#
+# Ordinarily they are the same thing, and ` + "`" + `me` + "`" + ` answers both. They come apart when somebody
+# asks to be judged by fewer roles than they hold — the "look at this as a lecturer" feature —
+# and at that point an interface that renders its navigation from ` + "`" + `me.roles` + "`" + ` would show the
+# menu of a person whose permissions the server is no longer applying. So the two are separate
+# fields with separate meanings, rather than one field that means different things depending
+# on a state the caller has to remember to ask about.
+
+"""
+How the current request is being judged.
+
+Read this rather than ` + "`" + `me` + "`" + ` when the question is "what may I do right now": it accounts for a
+role narrowing, which ` + "`" + `me` + "`" + ` deliberately does not.
+"""
+type Session {
+  "Who you are, or ` + "`" + `null` + "`" + ` if you are not signed in. The same value as the ` + "`" + `me` + "`" + ` query."
+  person: Person
+  """
+  The roles this request is actually judged by.
+
+  Equal to ` + "`" + `grantedRoles` + "`" + ` unless you asked to be narrowed. This is the list an interface
+  should render its navigation from.
+  """
+  effectiveRoles: [Role!]!
+  """
+  The roles you hold, whatever you are currently being judged by.
+
+  What you get back by ending the narrowing — which is why the control that ends it must not
+  itself be hidden by the narrowing.
+  """
+  grantedRoles: [Role!]!
+  """
+  Whether you asked to be judged by fewer roles than you hold.
+
+  ` + "`" + `true` + "`" + ` means what you are looking at is a preview and not your own view. Say so visibly:
+  somebody who forgets they are narrowed will eventually report a missing feature as a bug.
+  """
+  narrowed: Boolean!
+  """
+  Whether this is a signed-in browser session rather than a Personal Access Token.
+
+  ` + "`" + `false` + "`" + ` means the ` + "`" + `@interactiveOnly` + "`" + ` fields will answer ` + "`" + `null` + "`" + ` — worth checking before
+  concluding that something is empty.
+  """
+  interactive: Boolean!
+}
+
+extend type Query {
+  """
+  How this request is being judged: identity, effective roles, and whether they were narrowed.
+
+  Answers for anonymous callers too, with ` + "`" + `person: null` + "`" + ` and no roles — the interface renders
+  a signed-out state from it rather than from a failed query.
+  """
+  session: Session!
+}
+`, BuiltIn: false},
 	{Name: "../token.graphqls", Input: `"""
 A Personal Access Token, as its owner sees it.
 
@@ -542,6 +980,20 @@ var parsedSchema = gqlparser.MustLoadSchema(sources...)
 // Each function is generated once per unique object type, deduplicating the
 // switch statements that were previously inlined in every fieldContext_* function.
 
+func (ec *executionContext) childFields_AccessDiagnosis(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "person":
+		return ec.fieldContext_AccessDiagnosis_person(ctx, field)
+	case "active":
+		return ec.fieldContext_AccessDiagnosis_active(ctx, field)
+	case "grants":
+		return ec.fieldContext_AccessDiagnosis_grants(ctx, field)
+	case "decisions":
+		return ec.fieldContext_AccessDiagnosis_decisions(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type AccessDiagnosis", field.Name)
+}
+
 func (ec *executionContext) childFields_BuildInfo(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "version":
@@ -596,6 +1048,48 @@ func (ec *executionContext) childFields_PersonalAccessToken(ctx context.Context,
 		return ec.fieldContext_PersonalAccessToken_revokedAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type PersonalAccessToken", field.Name)
+}
+
+func (ec *executionContext) childFields_PolicyDecision(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "rule":
+		return ec.fieldContext_PolicyDecision_rule(ctx, field)
+	case "allowed":
+		return ec.fieldContext_PolicyDecision_allowed(ctx, field)
+	case "reason":
+		return ec.fieldContext_PolicyDecision_reason(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type PolicyDecision", field.Name)
+}
+
+func (ec *executionContext) childFields_RoleGrant(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "role":
+		return ec.fieldContext_RoleGrant_role(ctx, field)
+	case "grantedAt":
+		return ec.fieldContext_RoleGrant_grantedAt(ctx, field)
+	case "grantedBy":
+		return ec.fieldContext_RoleGrant_grantedBy(ctx, field)
+	case "expiresAt":
+		return ec.fieldContext_RoleGrant_expiresAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type RoleGrant", field.Name)
+}
+
+func (ec *executionContext) childFields_Session(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "person":
+		return ec.fieldContext_Session_person(ctx, field)
+	case "effectiveRoles":
+		return ec.fieldContext_Session_effectiveRoles(ctx, field)
+	case "grantedRoles":
+		return ec.fieldContext_Session_grantedRoles(ctx, field)
+	case "narrowed":
+		return ec.fieldContext_Session_narrowed(ctx, field)
+	case "interactive":
+		return ec.fieldContext_Session_interactive(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Session", field.Name)
 }
 
 func (ec *executionContext) childFields___Directive(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {

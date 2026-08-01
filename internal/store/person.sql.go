@@ -7,43 +7,34 @@ package store
 
 import (
 	"context"
+	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgtype"
 )
 
-const bootstrapAdmin = `-- name: BootstrapAdmin :one
-INSERT INTO person (id, mail, name)
-SELECT $1, $2, $3
-WHERE NOT EXISTS (SELECT 1 FROM person)
-RETURNING id, mail, name, active, created_at, updated_at
+const countOtherActiveAdmins = `-- name: CountOtherActiveAdmins :one
+SELECT count(*)
+FROM person_role pr
+JOIN person p ON p.id = pr.person_id
+WHERE pr.role = 'ADMIN'
+  AND p.active
+  AND (pr.expires_at IS NULL OR pr.expires_at > now())
+  AND pr.person_id <> $1
 `
 
-type BootstrapAdminParams struct {
-	ID   uuid.UUID
-	Mail string
-	Name string
-}
-
-// Creates the first person, and only the first.
+// How many people other than this one could still administer the installation.
 //
-// The WHERE NOT EXISTS is the whole safety argument: this statement can insert into an empty
-// table and nothing else. It cannot grant anything to somebody who already exists, so the
-// flag that calls it cannot be used to escalate an account — the worst it can do on a
-// populated database is nothing at all.
+// "Could still": active person, unexpired grant. A deactivated administrator and one whose
+// temporary grant ran out are both people who cannot let anybody back in, and counting them
+// would make the last-administrator guard pass at exactly the moment it is needed.
 //
-// Returns no row when the table is not empty, which the caller reads as "already bootstrapped".
-func (q *Queries) BootstrapAdmin(ctx context.Context, arg BootstrapAdminParams) (Person, error) {
-	row := q.db.QueryRow(ctx, bootstrapAdmin, arg.ID, arg.Mail, arg.Name)
-	var i Person
-	err := row.Scan(
-		&i.ID,
-		&i.Mail,
-		&i.Name,
-		&i.Active,
-		&i.CreatedAt,
-		&i.UpdatedAt,
-	)
-	return i, err
+// Called under the advisory lock, never on its own.
+func (q *Queries) CountOtherActiveAdmins(ctx context.Context, personID uuid.UUID) (int64, error) {
+	row := q.db.QueryRow(ctx, countOtherActiveAdmins, personID)
+	var count int64
+	err := row.Scan(&count)
+	return count, err
 }
 
 const createPerson = `-- name: CreatePerson :one
@@ -65,6 +56,12 @@ type CreatePersonParams struct {
 // queries would mean a window in which a person exists and their grants do not, and the
 // authenticator would have to decide what to do with a caller whose permissions it could not
 // read — a decision with only bad answers.
+//
+// The expiry filter sits in the JOIN condition rather than in a WHERE clause, in every query
+// below. That is not a style preference: in a LEFT JOIN, a WHERE on the right-hand table
+// turns the join into an inner one, so a person whose only grant has expired would disappear
+// from the list entirely instead of appearing with no roles. The version that leaks is the
+// one that hides people from the administration screen.
 // The id is supplied by the caller rather than defaulted, so that a fixture, a seed and an
 // import can all say who they are creating before the insert happens.
 func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Person, error) {
@@ -81,22 +78,165 @@ func (q *Queries) CreatePerson(ctx context.Context, arg CreatePersonParams) (Per
 	return i, err
 }
 
-const grantRole = `-- name: GrantRole :exec
-INSERT INTO person_role (person_id, role, granted_by)
+const ensurePerson = `-- name: EnsurePerson :one
+INSERT INTO person (id, mail, name)
 VALUES ($1, $2, $3)
-ON CONFLICT (person_id, role) DO NOTHING
+ON CONFLICT (mail) DO UPDATE
+SET updated_at = person.updated_at
+RETURNING id, mail, name, active, created_at, updated_at
+`
+
+type EnsurePersonParams struct {
+	ID   uuid.UUID
+	Mail string
+	Name string
+}
+
+// Get this mail address a person row, creating one if there is none.
+//
+// The reconciliation of the protected administrators runs through here on every start, so it
+// has to be a no-op on the ordinary case. ON CONFLICT DO UPDATE rather than DO NOTHING,
+// because DO NOTHING returns no row and the caller would need a second query to find the id
+// of the person it just did not create.
+//
+// name is only written when the row is created: a person renamed through the interface, or by
+// a future ZPA import, must not be renamed back on the next restart by a value somebody typed
+// into a YAML file once. The DO UPDATE therefore writes a column back to itself — a true
+// no-op that still produces a row to return, which DO NOTHING does not.
+func (q *Queries) EnsurePerson(ctx context.Context, arg EnsurePersonParams) (Person, error) {
+	row := q.db.QueryRow(ctx, ensurePerson, arg.ID, arg.Mail, arg.Name)
+	var i Person
+	err := row.Scan(
+		&i.ID,
+		&i.Mail,
+		&i.Name,
+		&i.Active,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+	)
+	return i, err
+}
+
+const grantRole = `-- name: GrantRole :exec
+INSERT INTO person_role (person_id, role, granted_by, expires_at)
+VALUES ($1, $2, $3, $4)
+ON CONFLICT (person_id, role) DO UPDATE
+SET granted_by = EXCLUDED.granted_by,
+    granted_at = now(),
+    expires_at = EXCLUDED.expires_at
 `
 
 type GrantRoleParams struct {
 	PersonID  uuid.UUID
 	Role      string
 	GrantedBy uuid.NullUUID
+	ExpiresAt pgtype.Timestamptz
 }
 
-// Idempotent: granting a role somebody already holds is not an error, and the alternative
-// would push every caller into a read-then-write race.
+// Idempotent in the sense that matters: granting a role somebody already holds updates its
+// expiry rather than failing, so "give me DEANS_OFFICE for another hour" is one call and not
+// a read-then-write race.
+//
+// granted_at is refreshed with it. The row records the grant that is in force, and a
+// timestamp that pointed at a superseded one would be the wrong answer to the audit question.
 func (q *Queries) GrantRole(ctx context.Context, arg GrantRoleParams) error {
-	_, err := q.db.Exec(ctx, grantRole, arg.PersonID, arg.Role, arg.GrantedBy)
+	_, err := q.db.Exec(ctx, grantRole,
+		arg.PersonID,
+		arg.Role,
+		arg.GrantedBy,
+		arg.ExpiresAt,
+	)
+	return err
+}
+
+const listPeople = `-- name: ListPeople :many
+SELECT
+    p.id,
+    p.mail,
+    p.name,
+    p.active,
+    COALESCE(
+        array_agg(pr.role ORDER BY pr.role) FILTER (WHERE pr.role IS NOT NULL),
+        ARRAY[]::text[]
+    )::text[] AS roles
+FROM person p
+LEFT JOIN person_role pr
+    ON pr.person_id = p.id
+   AND (pr.expires_at IS NULL OR pr.expires_at > now())
+WHERE ($1::text IS NULL
+       OR p.mail ILIKE '%' || $1::text || '%'
+       OR p.name ILIKE '%' || $1::text || '%')
+  AND ($2::boolean OR p.active)
+GROUP BY p.id
+ORDER BY p.name, p.mail
+`
+
+type ListPeopleParams struct {
+	Search          *string
+	IncludeInactive bool
+}
+
+type ListPeopleRow struct {
+	ID     uuid.UUID
+	Mail   string
+	Name   string
+	Active bool
+	Roles  []string
+}
+
+// The administration screen: everybody, or everybody active, optionally narrowed by a
+// substring of the mail address or the name.
+//
+// Ordered by name and then mail so that the list is stable between calls — an administration
+// table whose rows move between reloads is one where somebody eventually clicks the wrong
+// row. People with no name yet sort first, which is also where the work is.
+func (q *Queries) ListPeople(ctx context.Context, arg ListPeopleParams) ([]ListPeopleRow, error) {
+	rows, err := q.db.Query(ctx, listPeople, arg.Search, arg.IncludeInactive)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []ListPeopleRow{}
+	for rows.Next() {
+		var i ListPeopleRow
+		if err := rows.Scan(
+			&i.ID,
+			&i.Mail,
+			&i.Name,
+			&i.Active,
+			&i.Roles,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
+const lockAdminGrants = `-- name: LockAdminGrants :exec
+SELECT 1 FROM person_role WHERE role = 'ADMIN' FOR UPDATE
+`
+
+// Serialise every change that could remove the last administrator.
+//
+// The rule to protect is "at least one active person holds an unexpired ADMIN grant", and it
+// is a statement about a *set* of rows. Two administrators can each check it, each see the
+// other, and each commit a change that was only safe while the other did not happen — the
+// textbook write skew, and here its outcome is an installation nobody can get into.
+//
+// A single clever statement does not fix it, because the two dangerous operations touch
+// different tables: revoking ADMIN writes person_role, deactivating an administrator writes
+// person. What they have in common is these rows, so both take this lock first and the second
+// one waits and then re-reads.
+//
+// Row locks rather than an advisory lock on a constant: this is scoped to the current schema,
+// which is what lets the integration tests run in parallel, and it needs no magic number that
+// somebody else could pick again for something unrelated.
+func (q *Queries) LockAdminGrants(ctx context.Context) error {
+	_, err := q.db.Exec(ctx, lockAdminGrants)
 	return err
 }
 
@@ -111,7 +251,9 @@ SELECT
         ARRAY[]::text[]
     )::text[] AS roles
 FROM person p
-LEFT JOIN person_role pr ON pr.person_id = p.id
+LEFT JOIN person_role pr
+    ON pr.person_id = p.id
+   AND (pr.expires_at IS NULL OR pr.expires_at > now())
 WHERE p.id = $1
 GROUP BY p.id
 `
@@ -148,7 +290,9 @@ SELECT
         ARRAY[]::text[]
     )::text[] AS roles
 FROM person p
-LEFT JOIN person_role pr ON pr.person_id = p.id
+LEFT JOIN person_role pr
+    ON pr.person_id = p.id
+   AND (pr.expires_at IS NULL OR pr.expires_at > now())
 WHERE p.mail = $1
 GROUP BY p.id
 `
@@ -191,6 +335,54 @@ func (q *Queries) RevokeRole(ctx context.Context, arg RevokeRoleParams) error {
 	return err
 }
 
+const roleGrantsByPerson = `-- name: RoleGrantsByPerson :many
+SELECT
+    pr.role,
+    pr.granted_at,
+    pr.granted_by,
+    pr.expires_at
+FROM person_role pr
+WHERE pr.person_id = $1
+ORDER BY pr.role
+`
+
+type RoleGrantsByPersonRow struct {
+	Role      string
+	GrantedAt time.Time
+	GrantedBy uuid.NullUUID
+	ExpiresAt pgtype.Timestamptz
+}
+
+// One person's grants as they actually are, expired ones included.
+//
+// Deliberately not filtered: this is the detail view, and "DEANS_OFFICE, granted on Tuesday
+// by X, expired on Wednesday" is the answer to the only question this table gets asked —
+// who could see what, when. The permission lookups above are the ones that filter.
+func (q *Queries) RoleGrantsByPerson(ctx context.Context, personID uuid.UUID) ([]RoleGrantsByPersonRow, error) {
+	rows, err := q.db.Query(ctx, roleGrantsByPerson, personID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	items := []RoleGrantsByPersonRow{}
+	for rows.Next() {
+		var i RoleGrantsByPersonRow
+		if err := rows.Scan(
+			&i.Role,
+			&i.GrantedAt,
+			&i.GrantedBy,
+			&i.ExpiresAt,
+		); err != nil {
+			return nil, err
+		}
+		items = append(items, i)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return items, nil
+}
+
 const setPersonActive = `-- name: SetPersonActive :exec
 UPDATE person
 SET active = $2,
@@ -204,7 +396,32 @@ type SetPersonActiveParams struct {
 }
 
 // Deactivation is how a leaver loses access to everything at once, tokens included.
+//
+// The guard against deactivating the last administrator is not here. It cannot be: it depends
+// on a count over other rows, and a single statement that read that count would still race
+// with a concurrent deactivation. internal/store takes an advisory lock and checks first —
+// see AdminGrantLockKey.
 func (q *Queries) SetPersonActive(ctx context.Context, arg SetPersonActiveParams) error {
 	_, err := q.db.Exec(ctx, setPersonActive, arg.ID, arg.Active)
+	return err
+}
+
+const setPersonName = `-- name: SetPersonName :exec
+UPDATE person
+SET name = $2,
+    updated_at = now()
+WHERE id = $1
+`
+
+type SetPersonNameParams struct {
+	ID   uuid.UUID
+	Name string
+}
+
+// Renaming somebody. Separate from the role and activity paths because it is the one edit
+// here that is not a permission change, and mixing it in would make every rename look like
+// one in the audit log.
+func (q *Queries) SetPersonName(ctx context.Context, arg SetPersonNameParams) error {
+	_, err := q.db.Exec(ctx, setPersonName, arg.ID, arg.Name)
 	return err
 }

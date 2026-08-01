@@ -1,0 +1,57 @@
+# The difference between "who you are" and "how this request is being judged".
+#
+# Ordinarily they are the same thing, and `me` answers both. They come apart when somebody
+# asks to be judged by fewer roles than they hold — the "look at this as a lecturer" feature —
+# and at that point an interface that renders its navigation from `me.roles` would show the
+# menu of a person whose permissions the server is no longer applying. So the two are separate
+# fields with separate meanings, rather than one field that means different things depending
+# on a state the caller has to remember to ask about.
+
+"""
+How the current request is being judged.
+
+Read this rather than `me` when the question is "what may I do right now": it accounts for a
+role narrowing, which `me` deliberately does not.
+"""
+type Session {
+  "Who you are, or `null` if you are not signed in. The same value as the `me` query."
+  person: Person
+  """
+  The roles this request is actually judged by.
+
+  Equal to `grantedRoles` unless you asked to be narrowed. This is the list an interface
+  should render its navigation from.
+  """
+  effectiveRoles: [Role!]!
+  """
+  The roles you hold, whatever you are currently being judged by.
+
+  What you get back by ending the narrowing — which is why the control that ends it must not
+  itself be hidden by the narrowing.
+  """
+  grantedRoles: [Role!]!
+  """
+  Whether you asked to be judged by fewer roles than you hold.
+
+  `true` means what you are looking at is a preview and not your own view. Say so visibly:
+  somebody who forgets they are narrowed will eventually report a missing feature as a bug.
+  """
+  narrowed: Boolean!
+  """
+  Whether this is a signed-in browser session rather than a Personal Access Token.
+
+  `false` means the `@interactiveOnly` fields will answer `null` — worth checking before
+  concluding that something is empty.
+  """
+  interactive: Boolean!
+}
+
+extend type Query {
+  """
+  How this request is being judged: identity, effective roles, and whether they were narrowed.
+
+  Answers for anonymous callers too, with `person: null` and no roles — the interface renders
+  a signed-out state from it rather than from a failed query.
+  """
+  session: Session!
+}

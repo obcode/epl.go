@@ -21,4 +21,6 @@ type Resolver struct {
 	// Tokens is token management. Nil in the handful of tests that only ask for buildInfo —
 	// a resolver that panics on a field nobody exercised is louder than a fake that answers.
 	Tokens *domain.TokenService
+	// People is user administration, on the same terms as Tokens.
+	People *domain.PeopleService
 }

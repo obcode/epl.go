@@ -8,6 +8,23 @@ import (
 	"github.com/obcode/tallox.go/internal/policy"
 )
 
+// Why somebody sees what they see.
+//
+// Answers with decisions, never with content: it says whether a rule lets this person past, and
+// it never reads the thing behind the rule. That is what makes it usable for the ordinary
+// support question — "why can my colleague not see this" — without becoming a way around the
+// confidentiality it is describing.
+type AccessDiagnosis struct {
+	// The person the diagnosis is about.
+	Person *Person `json:"person"`
+	// An inactive person fails authentication on both doors, whatever roles they hold.
+	Active bool `json:"active"`
+	// Their grants, expired ones included.
+	Grants []*RoleGrant `json:"grants"`
+	// What the rules answer for this person, one entry per rule.
+	Decisions []*PolicyDecision `json:"decisions"`
+}
+
 // A newly created token: the record, and the one and only sight of the secret.
 type CreatedPersonalAccessToken struct {
 	// The token as it will appear in your list from now on.
@@ -70,9 +87,70 @@ type PersonalAccessToken struct {
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
+// One rule, and what it answers for this person.
+type PolicyDecision struct {
+	// The rule, named as it is named in the source — so that a report can be acted on.
+	Rule string `json:"rule"`
+	// What the rule answers for this person right now.
+	Allowed bool `json:"allowed"`
+	// Why, in a sentence somebody without the source in front of them can use.
+	Reason string `json:"reason"`
+}
+
 // Everything that can be read.
 //
 // Start with `me` to check that your token works and to see which roles you hold — the roles
 // decide what the rest of these fields answer.
 type Query struct {
+}
+
+// One role grant, as stored — including one that has already expired.
+//
+// Deliberately unfiltered, unlike `Person.roles`. "DEANS_OFFICE, granted on Tuesday by X,
+// expired on Wednesday" is the answer to the only question this record gets asked: who could see
+// what, and when.
+type RoleGrant struct {
+	// The role that was granted.
+	Role policy.Role `json:"role"`
+	// When it was granted. Refreshed when the same grant is re-issued with a new expiry.
+	GrantedAt time.Time `json:"grantedAt"`
+	// Who granted it, or `null` for a grant no human decided — the reconciliation of the
+	// protected administrators from the configuration file, or a future import.
+	GrantedBy *Person `json:"grantedBy,omitempty"`
+	// When it stops taking effect, or `null` if it does not expire.
+	//
+	// A grant with a date on it is how somebody steps over a threshold and has the database step
+	// back over it for them. The intended use is "let me look at this until this evening", not a
+	// way to hold a role for a semester — a grant meant to last that long should be visible as a
+	// permanent one rather than as a date nobody rereads.
+	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
+}
+
+// How the current request is being judged.
+//
+// Read this rather than `me` when the question is "what may I do right now": it accounts for a
+// role narrowing, which `me` deliberately does not.
+type Session struct {
+	// Who you are, or `null` if you are not signed in. The same value as the `me` query.
+	Person *Person `json:"person,omitempty"`
+	// The roles this request is actually judged by.
+	//
+	// Equal to `grantedRoles` unless you asked to be narrowed. This is the list an interface
+	// should render its navigation from.
+	EffectiveRoles []policy.Role `json:"effectiveRoles"`
+	// The roles you hold, whatever you are currently being judged by.
+	//
+	// What you get back by ending the narrowing — which is why the control that ends it must not
+	// itself be hidden by the narrowing.
+	GrantedRoles []policy.Role `json:"grantedRoles"`
+	// Whether you asked to be judged by fewer roles than you hold.
+	//
+	// `true` means what you are looking at is a preview and not your own view. Say so visibly:
+	// somebody who forgets they are narrowed will eventually report a missing feature as a bug.
+	Narrowed bool `json:"narrowed"`
+	// Whether this is a signed-in browser session rather than a Personal Access Token.
+	//
+	// `false` means the `@interactiveOnly` fields will answer `null` — worth checking before
+	// concluding that something is empty.
+	Interactive bool `json:"interactive"`
 }

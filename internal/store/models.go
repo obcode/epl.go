@@ -25,6 +25,8 @@ type PersonRole struct {
 	Role      string
 	GrantedAt time.Time
 	GrantedBy uuid.NullUUID
+	// When this grant stops taking effect. NULL means it does not expire. An expired row is kept rather than deleted: it is the record that the grant was held, which is exactly what the audit question "who could see this in October" needs.
+	ExpiresAt pgtype.Timestamptz
 }
 
 type PersonalAccessToken struct {
