@@ -56,19 +56,19 @@ func adminHandler(t *testing.T) http.Handler {
 	t.Helper()
 
 	s := storetest.New(t)
-	// Eins administers. Zwei does not — she is the persona every "may she?" question is about.
-	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleAdmin), string(policy.RoleLecturer))
+	// Sechs administers. Zwei does not — she is the persona every "may she?" question is about.
+	storetest.SeedPerson(t, s, testdata.Sechs, string(policy.RoleAdmin), string(policy.RoleLecturer))
 	storetest.SeedPerson(t, s, testdata.Zwei, string(policy.RoleLecturer))
 
-	// Eins also holds a working token. Without it the "not through a token" assertions would
+	// Sechs also holds a working token. Without it the "not through a token" assertions would
 	// pass for the wrong reason — a 401 for an unknown credential looks exactly like the
 	// directive doing its job, and would keep looking like it after somebody removed the
 	// directive.
-	parsed, err := auth.ParseToken(testdata.Eins.Token)
+	parsed, err := auth.ParseToken(testdata.Sechs.Token)
 	if err != nil {
 		t.Fatalf("the fixture token does not parse: %v", err)
 	}
-	storetest.SeedToken(t, s, testdata.Eins, auth.HashSecret(parsed.Secret), storetest.TokenOptions{})
+	storetest.SeedToken(t, s, testdata.Sechs, auth.HashSecret(parsed.Secret), storetest.TokenOptions{})
 
 	directory := store.NewDirectory(s.Pool)
 
@@ -98,7 +98,7 @@ func TestUserAdministrationIsNeverReachableThroughAToken(t *testing.T) {
 
 	t.Run("browser", func(t *testing.T) {
 		var got peopleResponse
-		c.AsUser(testdata.Eins.Mail).MustQuery(t, peopleQuery, nil, &got)
+		c.AsUser(testdata.Sechs.Mail).MustQuery(t, peopleQuery, nil, &got)
 		if got.People == nil || len(*got.People) != 2 {
 			t.Fatalf("the administrator got %v, want both seeded people", got.People)
 		}
@@ -106,7 +106,7 @@ func TestUserAdministrationIsNeverReachableThroughAToken(t *testing.T) {
 
 	t.Run("token: the query answers null", func(t *testing.T) {
 		var got peopleResponse
-		c.WithToken(testdata.Eins.Token).On(graphqltest.Token).
+		c.WithToken(testdata.Sechs.Token).On(graphqltest.Token).
 			MustQuery(t, peopleQuery, nil, &got)
 		if got.People != nil {
 			t.Errorf("a token read the user list: %v", *got.People)
@@ -114,7 +114,7 @@ func TestUserAdministrationIsNeverReachableThroughAToken(t *testing.T) {
 	})
 
 	t.Run("token: every mutation is refused", func(t *testing.T) {
-		token := c.WithToken(testdata.Eins.Token).On(graphqltest.Token)
+		token := c.WithToken(testdata.Sechs.Token).On(graphqltest.Token)
 		for name, call := range map[string]struct {
 			query string
 			vars  map[string]any
@@ -160,15 +160,15 @@ func TestOnlyAnAdministratorSeesTheUserList(t *testing.T) {
 func TestTheLastAdministratorCannotBeRemovedThroughTheAPI(t *testing.T) {
 	t.Parallel()
 
-	c := graphqltest.New(adminHandler(t)).AsUser(testdata.Eins.Mail)
-	eins := testdata.Eins.ID().String()
+	c := graphqltest.New(adminHandler(t)).AsUser(testdata.Sechs.Mail)
+	admin := testdata.Sechs.ID().String()
 
 	t.Run("by taking the role away", func(t *testing.T) {
-		c.MustFail(t, setRolesMutation, map[string]any{"id": eins, "roles": []string{"LECTURER"}})
+		c.MustFail(t, setRolesMutation, map[string]any{"id": admin, "roles": []string{"LECTURER"}})
 	})
 
 	t.Run("by deactivating the account", func(t *testing.T) {
-		c.MustFail(t, setActiveMutation, map[string]any{"id": eins, "active": false})
+		c.MustFail(t, setActiveMutation, map[string]any{"id": admin, "active": false})
 	})
 
 	// Still there, and still able to administer — which is the only assertion that matters.
@@ -208,7 +208,7 @@ func TestNarrowingRemovesPermissionsAndNeverAddsThem(t *testing.T) {
 	c := graphqltest.New(h)
 
 	t.Run("an administrator can look as a lecturer", func(t *testing.T) {
-		narrowed := c.AsUser(testdata.Eins.Mail).
+		narrowed := c.AsUser(testdata.Sechs.Mail).
 			WithHeader(auth.HeaderAssumeRoles, string(policy.RoleLecturer))
 
 		var got sessionResponse
@@ -254,7 +254,7 @@ func TestNarrowingRemovesPermissionsAndNeverAddsThem(t *testing.T) {
 func TestCreatingAPersonNeedsNothingButAMailAddress(t *testing.T) {
 	t.Parallel()
 
-	c := graphqltest.New(adminHandler(t)).AsUser(testdata.Eins.Mail)
+	c := graphqltest.New(adminHandler(t)).AsUser(testdata.Sechs.Mail)
 
 	var created struct {
 		CreatePerson struct {
