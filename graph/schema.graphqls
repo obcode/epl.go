@@ -1,10 +1,14 @@
+# Descriptions in this file are read by two audiences that have nothing to do with each
+# other: colleagues writing their own evaluations — in their editor's completion, and rendered
+# as the reference page in tallox.gui — and whoever maintains this repository.
+#
+# Only the first audience gets a description. Everything the second one needs is a `#`
+# comment: those never leave the source, because introspection does not report them. Before
+# this rule, notes to ourselves ("once the @scope directive lands …") were showing up in the
+# documentation colleagues read.
+
 """
 Version and provenance of the running server instance.
-
-Deliberately the smallest possible field: it exists so that the deployed version is visible
-in the GUI footer without reading container tags on the host, and so that both doors
-(`/query` behind the auth proxy, `/api/graphql` behind a bearer token) have something
-harmless to answer during a smoke test.
 """
 type BuildInfo {
   "Semantic version from the release tag, or `dev` in a local build."
@@ -15,17 +19,26 @@ type BuildInfo {
   builtAt: String!
 }
 
+"""
+Everything that can be read.
+
+Start with `me` to check that your token works and to see which roles you hold — the roles
+decide what the rest of these fields answer.
+"""
 type Query {
+  # The smallest possible field, on purpose: the deployed version has to be visible in the
+  # GUI footer without reading container tags on the host, and both doors need something
+  # harmless to answer during a smoke test.
+  #
+  # TODO(@scope): needs an explicit @scope(area: PUBLIC, verb: READ) once the directive
+  # lands. The fail-closed CI test — every root field carries a scope or the build breaks —
+  # will point right here.
   """
-  Build stamp of this server.
+  Which version of the server is answering.
 
-  Unauthenticated on purpose. The footer has to render before a session exists, and a smoke
-  test that fails on authorization cannot tell a broken proxy from a broken server.
-
-  NOTE: once the `@scope` directive lands this field needs an explicit
-  `@scope(area: PUBLIC, verb: READ)`. The fail-closed CI test — every root field carries a
-  scope or the build breaks — will point right here, which is why this is a note and not a
-  reminder someone has to remember.
+  Works without authentication, so it is also the simplest way to check that a token, a
+  network route or a proxy is doing what you expect: if this answers and nothing else does,
+  the problem is the credential and not the connection.
   """
   buildInfo: BuildInfo!
 }

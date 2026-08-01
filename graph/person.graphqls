@@ -1,54 +1,55 @@
+# Roles are not a ladder — a person holds a set of them, and the same colleague may lead a
+# subject group and a study programme. Every rule in internal/policy therefore asks about the
+# set rather than about "the" role.
+
 """
-A role grant.
+A role somebody holds. Everybody holds `LECTURER`; the others come on top of it.
 
-Roles are not a ladder. A person holds a set of them — the same colleague may lead a subject
-group and a study programme — so every rule asks about the set rather than about "the" role.
-
-The values are English; the GUI renders the German terms the faculty uses (Dozent:in,
-Fachgruppenleitung, Studiengangsleitung, Dekanat).
+The values are English. The interface shows the German terms the faculty uses: Dozent:in,
+Fachgruppenleitung, Studiengangsleitung, Dekanat.
 """
 enum Role {
-  "Teaches, maintains a profile and a competence profile, registers interest in instances."
+  "Teaches, keeps a profile and a competence profile, registers interest in instances."
   LECTURER
   "Assigns the instances of one subject group."
   SUBJECT_GROUP_LEAD
   "Declares the demand of one study programme: which instances are needed, and the catalogues."
   PROGRAMME_LEAD
-  "Reads across programmes for the import/export statistics, maintains the teaching-load traffic light."
+  "Reads across programmes for the import/export statistics, keeps the teaching-load traffic light."
   DEANS_OFFICE
-  "Administers users, roles and tokens. Deliberately not a reader of unpublished wishes."
+  "Administers people, roles and tokens. Not a reader of unpublished wishes."
   ADMIN
 }
+
+# Deliberately lean, and it stays that way. Personnel data — the teaching-load traffic light,
+# free-text notes — gets root fields of its own rather than being hung off this type, so that
+# there is no traversal path to it and @interactiveOnly is a second line of defence instead of
+# the only one.
 
 """
 A person in the planning.
 
-Deliberately lean. Personnel data — the teaching-load/overtime traffic light, free-text notes —
-does not hang off this type and never will: it lives in root fields of its own, so that there
-is no traversal path to it in the first place and the `@interactiveOnly` directive is a second
-line of defence rather than the only one.
+Carries identity and roles, nothing else. Teaching load and notes about people are not
+reachable here — see the `@interactiveOnly` note in the API documentation.
 """
 type Person {
   id: ID!
-  "The identity the auth proxy asserts, and the natural key of a person."
+  "The address the university's login asserts. Case-insensitive, and the key we match on."
   mail: String!
   name: String!
-  "The grants this person holds, in a stable order."
+  "The roles this person holds, in a stable order."
   roles: [Role!]!
 }
 
 extend type Query {
+  # TODO(@scope): needs an explicit @scope(area: PROFILE, verb: READ) once the directive
+  # lands, like every other root field.
   """
-  The authenticated caller, or `null` when there is none.
+  Who you are, as far as this server is concerned — or `null` if you are not signed in.
 
-  `null` rather than an error, because "nobody is logged in" is a normal state that the GUI
-  renders (the login page) rather than an exception it has to catch. It is also the smallest
-  honest answer to "did my credential work": a script that gets a person back knows its token
-  is valid, its owner is active, and which roles it will be judged by — through exactly the
-  same field the browser uses.
-
-  NOTE: once the `@scope` directive lands this field needs an explicit
-  `@scope(area: PROFILE, verb: READ)`, like every other root field.
+  The field to start with when writing a script: getting a person back means the token is
+  valid, its owner is active, and these are the roles the rest of your queries will be judged
+  by. It is the same field the web interface uses, so it cannot answer differently there.
   """
   me: Person
 }
