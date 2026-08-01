@@ -75,9 +75,15 @@ gowatch                                               # live-reloading server on
 ```
 
 The server needs `TALLOX_DB_URL` and applies the embedded migrations at startup.
-`-bootstrap-admin=<mail>` creates the first ADMIN — but only on a database with no person in
-it, so it cannot promote an existing account and does nothing at all on every restart after
-the first.
+
+Everything else comes from `tallox.yaml` (in `.` or `$HOME`, or `-config <path>`), with
+explicitly-set flags winning over it. An unknown key in that file is a startup failure rather
+than a shrug: a file that documents a setting the program ignores is worse than no file.
+
+`auth.protectedadmins` is the list of people who must be able to administer this installation
+whatever the database says. It is reconciled at every start — created, reactivated, granted
+ADMIN as needed, and never revoked. It is what makes a fresh database usable at all, and it is
+the way back in after an administrator has been removed by accident.
 
 Locally `-auth-mode=dev` injects a development user on the browser path, so the GraphQL
 playground at `/` works without a login. `gowatch` passes that flag (see `gowatch.yml`) —
