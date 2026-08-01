@@ -60,7 +60,8 @@ graph/                     gqlgen: *.graphqls (follow-schema) + *.resolvers.go �
 internal/buildinfo/        the ldflags version stamp. Shared by main, /healthz and `buildInfo`.
 internal/principal/        the authenticated Actor in the context. stdlib + uuid only.
 internal/auth/             two authenticators, one middleware, the PAT format
-internal/policy/           visibility and phase rules. Pure: no DB, no HTTP, no GraphQL.
+internal/policy/           visibility, phase and administration rules; role narrowing.
+                           Pure: no DB, no HTTP, no GraphQL.
 internal/domain/           business logic — token lifetimes, validation. No I/O of its own.
 internal/store/            the ONLY owner of pgxpool. sqlc-generated queries.
 internal/store/storetest/  integration harness: a migrated schema per test
@@ -121,12 +122,21 @@ startup. Without a database it refuses to start — it cannot authenticate anybo
 `-migrate-status` reports what is applied and what this binary would apply, then exits without
 touching anything.
 
-`-bootstrap-admin=<mail>` solves the first-boot deadlock: both doors need a person row, and
-handing out a Personal Access Token is itself something only a signed-in administrator can
-do, so a fresh database is locked from the outside with the key on the inside. The insert
-carries `WHERE NOT EXISTS (SELECT 1 FROM person)`, which is the whole safety argument — on a
-database that has ever had a person in it the flag does nothing, so it cannot promote an
-account on a running installation. **Migrations are not undone by a rollback**: pinning an older image tag
+`auth.protectedadmins` in `tallox.yaml` solves two problems with one mechanism. The first is
+the first-boot deadlock: both doors need a person row, and handing out a Personal Access Token
+is itself something only a signed-in administrator can do, so a fresh database is locked from
+the outside with the key on the inside. The second is an administrator removing another one by
+accident — on an installation reachable only through a VPN, "restart the container" is a much
+better recovery than psql on the host.
+
+It is reconciled at **every** start and is **additive only**: listed people are created,
+reactivated and granted ADMIN as needed, and nothing is ever revoked. A list that could revoke
+would turn a deleted line or a typo into a silent mass demotion found at the next restart.
+Deciding it in the authenticator instead does not work: an actor with no person row has no id,
+and the id is what `granted_by` references, what a token belongs to, and what the audit log
+resolves.
+
+**Migrations are not undone by a rollback**: pinning an older image tag
 leaves the newer schema in place, so every migration has to be one the previous image can run
 against — add a column in one release, stop reading the old one in the next, drop it in a
 third.
@@ -207,13 +217,53 @@ when. Keep it committed and keep it readable.
 The semester phase lives in the database and is advanced by an audited mutation, **never
 derived from the calendar**.
 
+### Administration, and the two things that protect it
+
+`policy.MayAdministerPeople` is ADMIN **and** an interactive session. Administration is
+`@interactiveOnly` because granting somebody a role from a long-lived token in a script would
+decouple "who did this" from any sign-in, and the act it decouples is the granting of access
+itself.
+
+**The last active administrator cannot be demoted or deactivated.** Both are the same refusal
+(`LAST_ADMIN`), because they have the same consequence. It is a transaction that locks the
+ADMIN grant rows before reading them: two administrators removing each other simultaneously is
+write skew — both checks are individually correct, and the outcome is an installation that has
+to be repaired from the host. The guard is in `internal/store` for the same reason the wish
+filter is: it is a statement about rows, and a version of it in a service layer passes its unit
+test while the shipped code races.
+
+**Roles can be narrowed, never widened.** `policy.Narrow` is `held ∩ selected`, which is the
+whole security argument: an intersection cannot add, so the selection may travel as an ordinary
+untrusted header (`X-Tallox-Assume-Roles`, browser door only) and nothing downstream has to
+establish where it came from. The obvious version — "let an administrator preview any role" —
+would hand ADMIN a two-click route into unpublished wishes, which is precisely the decision the
+policy makes deliberately in the other direction. To preview what a lecturer sees, hold
+LECTURER. `TestNarrowCanOnlyEverRemove` asserts the property exhaustively.
+
+`Actor.Roles` is the *effective* set, so narrowing reaches every rule automatically rather than
+the ones somebody remembered. `Actor.NarrowedFrom` is for the banner and the audit log, and for
+no rule.
+
+There is **no DEVELOPER role and there will not be one**. `diagnoseAccess` answers the support
+question — why can my colleague not see this — with decisions and never with content, and an
+administrator who genuinely has to look grants themselves DEANS_OFFICE visibly and with an
+expiry (`person_role.expires_at`, at most 30 days). A role that sees everything is a line in the
+golden matrix that has to be defended to the colleagues the confidentiality rule protects.
+
 ## Configuration
 
-Today: flags (`-addr`, `-playground`, `-auth-mode`, `-auth-dev-user`) plus `TALLOX_DB_URL`
-from the environment. The viper file below is the intended shape, not yet the implemented one.
+viper reads a single file `tallox.yaml` (in `.` or `$HOME`, or `-config <path>`), plus
+`TALLOX_DB_URL` from the environment. Secrets stay in the file, never in the database.
 
-Planned: viper, single file `tallox.yaml` (in `.` or `$HOME`), plus `TALLOX_DB_URL` from the environment.
-Secrets stay in the file, never in the database.
+Precedence is file, then **explicitly set** flags — `flag.Visit`, so that `-playground=false`
+is distinguishable from "the flag defaulted to false". Without that distinction every flag
+default silently overrides the file and the file is decorative, which stays invisible until
+somebody sets a value that happens to equal a default.
+
+`UnmarshalExact`: an unknown key is a **startup failure**. Every key the file may carry is
+read by something, and the blocks that are planned but not wired (ZPA, SMTP) are commented out
+in `deploy/tallox.yaml.example` rather than declared — so the file cannot document a setting
+the program ignores.
 
 Rule of thumb: YAML holds bootstrap values and secrets. Everything semester-scoped and
 user-editable (semester config, milestones, phases) lives in PostgreSQL and is edited through

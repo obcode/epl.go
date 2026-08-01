@@ -19,6 +19,16 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
+// Pool is the connection pool, named here so that the packages that merely hold one — the
+// wiring in bootstrap — can say its type without importing pgxpool.
+//
+// An alias rather than a defined type: it has to remain assignable to what pgxpool returns,
+// and the point is naming, not wrapping. Without it, bootstrap can pass a pool from one
+// function to another only as long as it never writes a signature that mentions it, which is
+// the sort of constraint that quietly breaks the moment somebody extracts a helper — and the
+// arch test that stops them is right to.
+type Pool = *pgxpool.Pool
+
 // Open creates a connection pool and verifies it can actually reach the database.
 //
 // The ping is not ceremony: without it a wrong DSN surfaces later, on the first query, as a

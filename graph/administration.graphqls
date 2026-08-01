@@ -1,0 +1,146 @@
+# User administration: who may use this installation, and as what.
+#
+# All of it is @interactiveOnly. Granting somebody a role is precisely the kind of act that
+# must stay tied to a login event — a long-lived token in a script decouples "who did this"
+# from any sign-in, and this is the surface where that would decouple the granting of access
+# itself. The rule is in policy.MayAdministerPeople rather than only in the directive, so that
+# a future export or maintenance command has to ask the same question.
+#
+# There is no deletePerson, and there will not be one. A person row is never removed: the
+# assignments they held stay in the history, the audit log has to keep resolving who did what,
+# and their tokens are referenced with ON DELETE RESTRICT. Deactivating is the removal this
+# system has, and it takes away everything at once, tokens included.
+
+"""
+One role grant, as stored — including one that has already expired.
+
+Deliberately unfiltered, unlike `Person.roles`. "DEANS_OFFICE, granted on Tuesday by X,
+expired on Wednesday" is the answer to the only question this record gets asked: who could see
+what, and when.
+"""
+type RoleGrant {
+  "The role that was granted."
+  role: Role!
+  "When it was granted. Refreshed when the same grant is re-issued with a new expiry."
+  grantedAt: Time!
+  """
+  Who granted it, or `null` for a grant no human decided — the reconciliation of the
+  protected administrators from the configuration file, or a future import.
+  """
+  grantedBy: Person
+  """
+  When it stops taking effect, or `null` if it does not expire.
+
+  A grant with a date on it is how somebody steps over a threshold and has the database step
+  back over it for them. The intended use is "let me look at this until this evening", not a
+  way to hold a role for a semester — a grant meant to last that long should be visible as a
+  permanent one rather than as a date nobody rereads.
+  """
+  expiresAt: Time
+}
+
+"""
+Why somebody sees what they see.
+
+Answers with decisions, never with content: it says whether a rule lets this person past, and
+it never reads the thing behind the rule. That is what makes it usable for the ordinary
+support question — "why can my colleague not see this" — without becoming a way around the
+confidentiality it is describing.
+"""
+type AccessDiagnosis {
+  "The person the diagnosis is about."
+  person: Person!
+  "An inactive person fails authentication on both doors, whatever roles they hold."
+  active: Boolean!
+  "Their grants, expired ones included."
+  grants: [RoleGrant!]!
+  "What the rules answer for this person, one entry per rule."
+  decisions: [PolicyDecision!]!
+}
+
+"""
+One rule, and what it answers for this person.
+"""
+type PolicyDecision {
+  "The rule, named as it is named in the source — so that a report can be acted on."
+  rule: String!
+  "What the rule answers for this person right now."
+  allowed: Boolean!
+  "Why, in a sentence somebody without the source in front of them can use."
+  reason: String!
+}
+
+extend type Query {
+  """
+  Everybody this installation knows.
+
+  `search` matches a substring of the mail address or the name. `includeInactive` brings back
+  the people who have been deactivated; they are hidden by default because the list is
+  otherwise mostly leavers after a few years.
+  """
+  people(search: String, includeInactive: Boolean): [Person!] @interactiveOnly
+
+  "One person, or `null` if there is nobody with that id."
+  person(id: ID!): Person @interactiveOnly
+
+  """
+  One person's role grants, expired ones included.
+
+  Separate from `Person.roles`, which is the set in force right now. The two answer different
+  questions and merging them would lose the one this is for.
+  """
+  roleGrants(personId: ID!): [RoleGrant!] @interactiveOnly
+
+  """
+  Why a given person sees what they see.
+
+  Takes the mail address rather than an id, because the question arrives as "Kollegin X says
+  she cannot see the demand planning" and the address is what the asker has.
+  """
+  diagnoseAccess(mail: String!): AccessDiagnosis @interactiveOnly
+}
+
+extend type Mutation {
+  """
+  Add somebody to this installation.
+
+  The mail address is all that is required, and it is the only thing that has to be right: it
+  is what the login asserts, so it decides whether this person can sign in at all. The name
+  can be filled in later, by them or by an import. Requiring it here would mean finding out
+  how a new colleague spells their first name before their account can exist.
+
+  A new person holds no roles. Even LECTURER is granted explicitly, so that who may do what is
+  a list somebody wrote rather than a default nobody chose.
+  """
+  createPerson(mail: String!, name: String): Person! @interactiveOnly
+
+  "Set somebody's display name."
+  renamePerson(id: ID!, name: String!): Person! @interactiveOnly
+
+  """
+  Bring somebody's roles to exactly this set.
+
+  The whole set rather than add and remove, because that is what the screen shows and because
+  add/remove loses to a race the moment two administrators have the same person open: the
+  second one's stale view of what the first did would decide the outcome.
+
+  `expiresAt` applies to the roles being *added*. Roles already held keep their own expiry
+  unless they are re-granted, so re-sending an unchanged set does not silently extend
+  anything.
+
+  Refused with `LAST_ADMIN` when it would leave the installation with nobody who can
+  administer it.
+  """
+  setPersonRoles(id: ID!, roles: [Role!]!, expiresAt: Time): Person! @interactiveOnly
+
+  """
+  Activate or deactivate somebody.
+
+  Deactivating is the removal this system has: an inactive person fails authentication on both
+  doors, so it withdraws their tokens in the same moment without touching a token row.
+
+  Refused with `LAST_ADMIN` when it would deactivate the last administrator — that is the same
+  refusal as taking their ADMIN away, because it has the same consequence.
+  """
+  setPersonActive(id: ID!, active: Boolean!): Person! @interactiveOnly
+}

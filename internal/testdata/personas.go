@@ -150,6 +150,19 @@ var (
 		Part:    "dean's office — reads across programmes, writes little",
 	}
 
+	// Sechs administers: creates people, grants roles, and is deliberately *not* a reader of
+	// unpublished wishes. Separate from Fuenf because "runs the system" and "reads everything
+	// the process produces" are different jobs, and the policy says so — a fixture that
+	// conflated them would make the one decision this project has to defend look like an
+	// oversight.
+	Sechs = Persona{
+		Mail:    "admin@example.org",
+		Name:    "Admin",
+		TokenID: "FFFFFFFFFFFFFFFF",
+		Token:   "tallox_FFFFFFFFFFFFFFFF_example_sechs_00000000000000000000000000000",
+		Part:    "administers people and roles — not a reader of wishes",
+	}
+
 	// Anon is nobody: no proxy header, no token. The persona for the questions that are easy
 	// to forget to ask, such as which fields answer before a session exists.
 	Anon = Persona{
@@ -167,7 +180,7 @@ var (
 // caller produces assertions that are wrong for one entry and right for the rest, which is
 // the kind of test that gets a special case bolted on instead of being fixed.
 func All() []Persona {
-	return []Persona{Eins, Zwei, Drei, Vier, Fuenf}
+	return []Persona{Eins, Zwei, Drei, Vier, Fuenf, Sechs}
 }
 
 // Others returns every authenticated persona except the given one — the natural argument for

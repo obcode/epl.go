@@ -21,6 +21,20 @@ import (
 // property, not something this package can check.
 const HeaderRemoteUser = "X-Remote-User"
 
+// HeaderAssumeRoles is how a signed-in person asks to be judged by fewer roles than they
+// hold — the "look at this as a lecturer" feature.
+//
+// Unlike HeaderRemoteUser this one is *not* set by the proxy and is not trusted. It does not
+// have to be: policy.Narrow intersects the selection with the grants the person actually
+// holds, so the worst a hand-written header can do is take privileges away from whoever sent
+// it. That is the reason it may travel as an ordinary header at all, and the reason Caddy
+// does not need a rule for it.
+//
+// Browser door only. A Personal Access Token already carries exactly its owner's roles, and
+// narrowing what a script may do is what scopes are for — adding a second, header-shaped way
+// to do it would mean two mechanisms answering one question.
+const HeaderAssumeRoles = "X-Tallox-Assume-Roles"
+
 // ProxyAuthenticator is the browser door: identity arrives as a header, the account and its
 // roles come from the database.
 //
@@ -62,7 +76,7 @@ func (a *ProxyAuthenticator) Authenticate(ctx context.Context, r *http.Request) 
 
 	if mail == "" {
 		if a.mode == ModeDev {
-			return a.developmentActor(), nil
+			return narrowIfRequested(a.developmentActor(), r), nil
 		}
 		// No header. In production that is the login page, the health check, or a request
 		// that reached the server without passing the proxy — none of which is an error here:
@@ -92,13 +106,42 @@ func (a *ProxyAuthenticator) Authenticate(ctx context.Context, r *http.Request) 
 		return principal.Anonymous, fmt.Errorf("%w: %s", ErrInactiveUser, mail)
 	}
 
-	return principal.Actor{
+	return narrowIfRequested(principal.Actor{
 		ID:    person.ID,
 		Mail:  person.Mail,
 		Name:  person.Name,
 		Roles: person.Roles,
 		Kind:  principal.KindInteractive,
-	}, nil
+	}, r), nil
+}
+
+// narrowIfRequested applies HeaderAssumeRoles, if it is there.
+//
+// Absent header and present-but-empty header are deliberately different. Absent means "judge
+// me normally". Empty means "judge me as somebody with no grants at all", which is a view
+// worth being able to look at — it is what a colleague sees on the day the import has created
+// their person row and nobody has given them anything yet, and that page is one somebody
+// should have seen before it happens.
+//
+// Everything the header can do is bounded by policy.Narrow, which intersects. There is
+// therefore no validation to perform here and no refusal to write: a garbled value narrows to
+// fewer roles, never to more.
+func narrowIfRequested(a principal.Actor, r *http.Request) principal.Actor {
+	values := r.Header.Values(HeaderAssumeRoles)
+	if len(values) == 0 {
+		return a
+	}
+
+	var selected []string
+	for _, v := range values {
+		for _, part := range strings.Split(v, ",") {
+			if part = strings.TrimSpace(part); part != "" {
+				selected = append(selected, part)
+			}
+		}
+	}
+
+	return policy.Narrow(a, policy.ParseRoles(selected))
 }
 
 // DefaultDevUser is the mail address of the injected development user.

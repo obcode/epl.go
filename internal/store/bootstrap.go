@@ -10,81 +10,151 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// BootstrapAdmin creates the very first person, with the ADMIN role, if there is no person at
-// all. It reports whether it created one.
+// ProtectedAdmin is one entry of the list in tallox.yaml: somebody who must be able to
+// administer this installation whatever the database currently says.
+type ProtectedAdmin struct {
+	// Mail is the identity the auth proxy asserts. The natural key of a person.
+	Mail string
+	// Name is optional. It is written only when the person row is created — see EnsurePerson.
+	Name string
+}
+
+// ReconcileOutcome reports what reconciling one entry changed, so the caller can log the
+// interesting cases and stay silent about the ordinary one.
+type ReconcileOutcome struct {
+	Mail        string
+	Created     bool
+	Reactivated bool
+	Granted     bool
+}
+
+// Changed reports whether anything happened at all. On a healthy installation every outcome
+// answers false, which is what makes a log line about the others worth reading.
+func (o ReconcileOutcome) Changed() bool { return o.Created || o.Reactivated || o.Granted }
+
+// ReconcileProtectedAdmins makes the listed people exist, be active, and hold ADMIN.
 //
 // # Why this exists
 //
-// Both doors need a person row. The browser door resolves X-Remote-User against the person
-// table, and a Personal Access Token belongs to a person — so on a freshly created database
-// nobody can sign in, and nobody can be given a token either, because handing out tokens is
-// itself something only a signed-in administrator can do. A new installation is locked from
-// the outside with the key on the inside.
+// Two problems, and it is one mechanism for both.
 //
-// The alternative is what happened the first time: somebody connects to production with psql
-// and writes the row by hand, at the exact moment the system is new and nobody is sure what
-// the schema looks like.
+// The first is the first boot. Both doors resolve identity against the person table, and
+// handing out a Personal Access Token is itself something only a signed-in administrator can
+// do — so a freshly created database is locked from the outside with the key on the inside.
+// Somebody has to be in it before anybody can be let in.
 //
-// # Why it cannot be abused
+// The second is the one this was actually asked for: an administrator removing another one by
+// accident. On an installation reachable only through a VPN, whose other repair is psql on
+// the host at a moment when somebody is already having a bad afternoon, "restart the
+// container" is a far better recovery procedure. Running on every start rather than only on
+// an empty database is the entire difference between the two.
 //
-// The insert carries WHERE NOT EXISTS (SELECT 1 FROM person). On any database that has ever
-// had a person in it, the statement does nothing — so the flag that calls this cannot promote
-// an existing account, cannot re-grant ADMIN to somebody who lost it, and cannot be used
-// against a running installation at all. It is a first-boot mechanism and it stops working
-// permanently the moment it has done its job.
+// # Additive, always
 //
-// The role grant runs in the same transaction as the insert. An administrator without the
-// ADMIN role would be the one outcome worse than no administrator: the row exists, so the
-// bootstrap never runs again, and there is still nobody who can administer anything.
-func BootstrapAdmin(ctx context.Context, pool *pgxpool.Pool, mail, name string) (bool, error) {
-	if mail == "" {
-		return false, errors.New("bootstrap admin: no mail address given")
+// It creates, reactivates and grants. It never revokes, never deactivates, never renames. A
+// list that could take something away would turn an edit to a YAML file — a deleted line, a
+// typo in an address — into a silent mass demotion discovered at the next restart. The list
+// answers "who must be able to get in", not "who may".
+//
+// # Why not decide this in the authenticator instead
+//
+// The tempting alternative is to hand the listed addresses ADMIN at request time, with no
+// database row at all. It does not work: an actor with no person row has no id, and the id is
+// what granted_by references, what a token belongs to, and what the audit log resolves. The
+// result would be an administrator who cannot grant anybody anything and whose actions cannot
+// be attributed. The row is what makes the rest of the system able to talk about this person.
+func ReconcileProtectedAdmins(ctx context.Context, pool *pgxpool.Pool,
+	admins []ProtectedAdmin) ([]ReconcileOutcome, error) {
+	outcomes := make([]ReconcileOutcome, 0, len(admins))
+
+	for _, admin := range admins {
+		if admin.Mail == "" {
+			return nil, errors.New("protected admin without a mail address")
+		}
+		outcome, err := reconcileOne(ctx, pool, admin)
+		if err != nil {
+			return nil, fmt.Errorf("cannot reconcile %s: %w", admin.Mail, err)
+		}
+		outcomes = append(outcomes, outcome)
 	}
-	if name == "" {
-		name = mail
-	}
+
+	return outcomes, nil
+}
+
+// reconcileOne does the three steps for a single entry, in one transaction.
+//
+// One transaction per entry rather than one for the whole list: a malformed entry halfway
+// down must not undo the entries above it. The list exists to get somebody back in, and
+// getting four of five people back in beats getting nobody back in because the fifth address
+// has a typo.
+func reconcileOne(ctx context.Context, pool *pgxpool.Pool,
+	admin ProtectedAdmin) (ReconcileOutcome, error) {
+	outcome := ReconcileOutcome{Mail: admin.Mail}
 
 	tx, err := pool.Begin(ctx)
 	if err != nil {
-		return false, fmt.Errorf("cannot begin the bootstrap transaction: %w", err)
+		return outcome, fmt.Errorf("cannot begin: %w", err)
 	}
 	// Rollback after a successful commit is a no-op, so this needs no branching.
 	defer func() { _ = tx.Rollback(ctx) }()
 
 	q := New(tx)
 
-	person, err := q.BootstrapAdmin(ctx, BootstrapAdminParams{
-		ID:   uuid.New(),
-		Mail: mail,
-		Name: name,
+	// The id is offered rather than defaulted, which is what makes "did this create the row"
+	// answerable without a second query: EnsurePerson returns the existing row on conflict,
+	// so getting our own id back means there was no conflict.
+	offered := uuid.New()
+	person, err := q.EnsurePerson(ctx, EnsurePersonParams{
+		ID:   offered,
+		Mail: admin.Mail,
+		Name: admin.Name,
 	})
-	if errors.Is(err, pgx.ErrNoRows) {
-		// The table is not empty. Not an error: this is the ordinary case on every restart
-		// after the first, and the flag is expected to stay set in the deploy configuration.
-		return false, nil
-	}
 	if err != nil {
-		return false, fmt.Errorf("cannot create the first person: %w", err)
+		return outcome, fmt.Errorf("cannot ensure the person row: %w", err)
+	}
+	outcome.Created = person.ID == offered
+
+	if !person.Active {
+		if err := q.SetPersonActive(ctx, SetPersonActiveParams{
+			ID: person.ID, Active: true,
+		}); err != nil {
+			return outcome, fmt.Errorf("cannot reactivate: %w", err)
+		}
+		outcome.Reactivated = true
 	}
 
-	if err := q.GrantRole(ctx, GrantRoleParams{
-		PersonID: person.ID,
-		Role:     roleAdmin,
-	}); err != nil {
-		return false, fmt.Errorf("cannot grant ADMIN to the first person: %w", err)
+	// PersonByID filters expired grants, so somebody whose ADMIN ran out counts as not
+	// holding it — which is the correct reading. An expired grant lets nobody in.
+	current, err := q.PersonByID(ctx, person.ID)
+	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		return outcome, fmt.Errorf("cannot read the grants: %w", err)
+	}
+	if !hasRole(current.Roles, roleAdmin) {
+		// granted_by stays NULL: no human decided this, and that is exactly what the
+		// column's NULL means. A self-reference would claim the person granted it to
+		// themselves.
+		//
+		// No expiry either. A grant that repairs a lock-out and then expires is a lock-out
+		// with a delay on it.
+		if err := q.GrantRole(ctx, GrantRoleParams{
+			PersonID: person.ID,
+			Role:     roleAdmin,
+		}); err != nil {
+			return outcome, fmt.Errorf("cannot grant ADMIN: %w", err)
+		}
+		outcome.Granted = true
 	}
 
 	if err := tx.Commit(ctx); err != nil {
-		return false, fmt.Errorf("cannot commit the bootstrap: %w", err)
+		return outcome, fmt.Errorf("cannot commit: %w", err)
 	}
-	return true, nil
+	return outcome, nil
 }
 
 // roleAdmin is the one role name this package needs to know.
 //
-// Spelled out rather than imported from internal/policy, because the dependency would run
-// storage → policy for a single string, and the CHECK constraint in the migration is what
-// actually validates it: a typo here fails the insert rather than granting something
-// meaningless. The three-way agreement between schema, policy and constraint is tested
-// elsewhere.
+// Spelled out rather than imported from internal/policy, because the CHECK constraint in the
+// migration is what actually validates it: a typo here fails the insert rather than granting
+// something meaningless. The three-way agreement between schema, policy and constraint is
+// tested elsewhere in this package.
 const roleAdmin = "ADMIN"

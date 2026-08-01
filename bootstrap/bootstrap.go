@@ -47,11 +47,23 @@ type Options struct {
 	Build buildinfo.Info
 	// Playground enables the GraphQL playground at "/".
 	Playground bool
+	// DisableIntrospection turns schema introspection off.
+	//
+	// Negated on purpose, so that the zero value leaves it on. Introspection is on by
+	// default here, in production too — the API is a product, and introspection is what makes
+	// editor completion, codegen and schema exploration work for colleagues writing their own
+	// evaluations. A field whose zero value silently contradicted the documented default
+	// would turn every future `Options{…}` literal in a test into a different server from the
+	// one that ships.
+	DisableIntrospection bool
 	// Auth configures both doors: the mode, and the two lookups.
 	Auth auth.Config
 	// Tokens is token management. Nil is legitimate for the tests that never reach a token
 	// field; a request that does reach one then fails loudly rather than answering wrongly.
 	Tokens *domain.TokenService
+	// People is user administration. Nil like Tokens: legitimate for a test that never
+	// reaches one of its fields.
+	People *domain.PeopleService
 }
 
 // Serve parses flags, sets up logging and runs the HTTP server until a signal arrives.
@@ -77,15 +89,37 @@ func Serve(build buildinfo.Info) {
 		// answer it is reporting.
 		migrateStatus = flag.Bool("migrate-status", false,
 			"report which migrations are applied and pending, then exit")
-		// Only ever acts on a database with no people in it — see store.BootstrapAdmin. It is
-		// meant to stay set in the deploy configuration: on every restart after the first it
-		// does nothing at all.
-		bootstrapAdmin = flag.String("bootstrap-admin", "",
-			"mail address to create as the first ADMIN, if no person exists yet")
+		// Where the configuration file is. Empty means "look for tallox.yaml in . and $HOME",
+		// which is what the container and the development loop both want.
+		configPath = flag.String("config", "",
+			"path to the configuration file (default: tallox.yaml in . or $HOME)")
 	)
 	flag.Parse()
 
-	setupLogging(*verbose)
+	cfg, configFile, err := LoadConfig(*configPath)
+	if err != nil {
+		// Before setupLogging, so this uses the zerolog default writer rather than the
+		// configured one. That is the right way round: the thing that failed is the source of
+		// the logging configuration.
+		log.Fatal().Err(err).Msg("cannot start")
+	}
+	cfg, err = ApplyFlagOverrides(cfg, FlagsSet(), FlagOverrides{
+		Addr:       *addr,
+		Playground: *playgroundEnabled,
+		AuthMode:   *authMode,
+		DevUser:    *devUser,
+		Verbose:    *verbose,
+	})
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot start")
+	}
+
+	setupLogging(cfg.Log.Level)
+	if configFile != "" {
+		log.Info().Str("file", configFile).Msg("configuration loaded")
+	} else {
+		log.Info().Msg("no configuration file found — flags and defaults only")
+	}
 	log.Info().
 		Str("version", build.Version).
 		Str("commit", build.Commit).
@@ -108,7 +142,7 @@ func Serve(build buildinfo.Info) {
 		return
 	}
 
-	mode, err := auth.ParseMode(*authMode)
+	mode, err := auth.ParseMode(cfg.Auth.Mode)
 	if err != nil {
 		log.Fatal().Err(err).Msg("cannot start")
 	}
@@ -127,56 +161,46 @@ func Serve(build buildinfo.Info) {
 		log.Fatal().Err(err).Msg("cannot reach the database")
 	}
 
-	// The bootstrap runs before `defer pool.Close()` is installed, so that its failure path
-	// may use log.Fatal like every other startup step. Afterwards the pool lives for as long
-	// as the process does.
+	// The reconciliation runs before `defer pool.Close()` is installed, so that its failure
+	// path may use log.Fatal like every other startup step. Afterwards the pool lives for as
+	// long as the process does.
 	//
-	// After the migrations, before serving: on a database that has never had a person in it,
-	// nobody can sign in and nobody can be given a token either, because handing out tokens is
-	// something only a signed-in administrator can do. A new installation would be locked from
-	// the outside with the key on the inside.
-	if *bootstrapAdmin != "" {
-		created, err := store.BootstrapAdmin(ctx, pool, *bootstrapAdmin, "")
-		if err != nil {
-			log.Fatal().Err(err).Msg("cannot bootstrap the first administrator")
-		}
-		if created {
-			// Loudly, once: somebody now holds ADMIN who was not granted it by a human, and
-			// that belongs in the log even though it can only ever have happened on an empty
-			// database.
-			log.Warn().Str("mail", *bootstrapAdmin).
-				Msg("created the first administrator — remove -bootstrap-admin once a second " +
-					"administrator exists")
-		}
-	}
+	// After the migrations, before serving. It is what makes a fresh database usable at all —
+	// nobody can sign in and nobody can be given a token until somebody is in the person table
+	// — and it is the way back in after an administrator has been removed by accident. See
+	// store.ReconcileProtectedAdmins.
+	reconcileProtectedAdmins(ctx, pool, cfg.Auth.ProtectedAdmins)
 
 	defer pool.Close()
 
 	directory := store.NewDirectory(pool)
 	tokens := domain.NewTokenService(store.NewTokens(pool), nil)
+	people := domain.NewPeopleService(store.NewPeople(pool), nil)
 
 	srv := &http.Server{
-		Addr: *addr,
+		Addr: cfg.Server.Addr(),
 		Handler: Handler(Options{
-			Build:      build,
-			Playground: *playgroundEnabled,
+			Build:                build,
+			Playground:           cfg.Server.Playground,
+			DisableIntrospection: !cfg.Server.Introspection,
 			Auth: auth.Config{
 				Mode:    mode,
 				Users:   directory,
 				Tokens:  directory,
-				DevUser: *devUser,
+				DevUser: cfg.Auth.DevUser,
 			},
 			Tokens: tokens,
+			People: people,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-			log.Fatal().Err(err).Str("addr", *addr).Msg("cannot listen")
+			log.Fatal().Err(err).Str("addr", cfg.Server.Addr()).Msg("cannot listen")
 		}
 	}()
-	log.Info().Str("addr", *addr).Str("authMode", string(mode)).Msg("listening")
+	log.Info().Str("addr", cfg.Server.Addr()).Str("authMode", string(mode)).Msg("listening")
 
 	stop := make(chan os.Signal, 1)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM)
@@ -187,6 +211,50 @@ func Serve(build buildinfo.Info) {
 	defer cancel()
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Error().Err(err).Msg("cannot shut down cleanly")
+	}
+}
+
+// reconcileProtectedAdmins runs the list from tallox.yaml and reports what it changed.
+//
+// A failure here is fatal, deliberately. The list is the thing that says who can get into
+// this installation, and a server that starts having failed to apply it looks healthy while
+// being in exactly the state the list exists to prevent. Refusing to start is the loud
+// version of the same problem, and it is the one somebody notices.
+//
+// An empty list is not a failure and not a warning. Every start after the first, on an
+// installation whose administrators are all in the database, is allowed to be quiet — but a
+// list that does nothing is worth saying once, because "I put my address in the file" and
+// "the file the container reads" are two different things more often than one would like.
+func reconcileProtectedAdmins(ctx context.Context, pool store.Pool, admins []ProtectedAdmin) {
+	if len(admins) == 0 {
+		log.Warn().Msg("no protected administrators configured — if the last ADMIN is ever " +
+			"removed, the only way back in is psql on the host. See auth.protectedadmins.")
+		return
+	}
+
+	entries := make([]store.ProtectedAdmin, 0, len(admins))
+	for _, a := range admins {
+		entries = append(entries, store.ProtectedAdmin{Mail: a.Mail, Name: a.Name})
+	}
+
+	outcomes, err := store.ReconcileProtectedAdmins(ctx, pool, entries)
+	if err != nil {
+		log.Fatal().Err(err).Msg("cannot reconcile the protected administrators")
+	}
+
+	for _, o := range outcomes {
+		if !o.Changed() {
+			continue
+		}
+		// At Warn, with the address in it. Somebody now holds ADMIN who was not granted it by
+		// a human — which is the whole purpose of the mechanism and precisely the reason it
+		// has to leave a trace that is visible in an ordinary production log.
+		log.Warn().
+			Str("mail", o.Mail).
+			Bool("created", o.Created).
+			Bool("reactivated", o.Reactivated).
+			Bool("granted", o.Granted).
+			Msg("protected administrator restored from the configuration file")
 	}
 }
 
@@ -257,7 +325,7 @@ func router(opts Options) http.Handler {
 // transport that nobody has thought about is an auth path that nobody has thought about.
 func graphqlHandler(opts Options) http.Handler {
 	srv := handler.New(generated.NewExecutableSchema(generated.Config{
-		Resolvers: &graph.Resolver{Build: opts.Build, Tokens: opts.Tokens},
+		Resolvers: &graph.Resolver{Build: opts.Build, Tokens: opts.Tokens, People: opts.People},
 		// The generated code fails closed on a directive with no implementation — the field
 		// errors with "directive interactiveOnly is not implemented" rather than passing
 		// through. So forgetting this line breaks token management loudly instead of
@@ -273,8 +341,11 @@ func graphqlHandler(opts Options) http.Handler {
 
 	// Introspection stays on, in production too. The API is a product: it is what makes
 	// editor completion, codegen and schema exploration work for colleagues writing their
-	// own evaluations against a Personal Access Token.
-	srv.Use(extension.Introspection{})
+	// own evaluations against a Personal Access Token. The switch exists because the
+	// configuration file documents one, not because it is expected to be used.
+	if !opts.DisableIntrospection {
+		srv.Use(extension.Introspection{})
+	}
 	srv.Use(extension.AutomaticPersistedQuery{Cache: lru.New[string](100)})
 
 	return srv
@@ -288,13 +359,26 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	}
 }
 
-func setupLogging(verbose bool) {
+// setupLogging applies the configured level.
+//
+// An unrecognised level falls back to info and says so, rather than refusing to start. Every
+// other configuration mistake in this file is fatal — see LoadConfig — but this one is not, on
+// purpose: the failure mode of a typo in the logging level is that the logs are the wrong
+// verbosity, and refusing to serve the faculty's planning tool over that is a worse outcome
+// than the problem. The warning is what makes it noticed, and it is legible precisely because
+// the fallback keeps the log running.
+func setupLogging(level string) {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
-	level := zerolog.InfoLevel
-	if verbose {
-		level = zerolog.DebugLevel
+
+	parsed, err := zerolog.ParseLevel(level)
+	if err != nil || parsed == zerolog.NoLevel {
+		parsed = zerolog.InfoLevel
+		defer func() {
+			log.Warn().Str("configured", level).
+				Msg("unknown log level, using info")
+		}()
 	}
-	zerolog.SetGlobalLevel(level)
+	zerolog.SetGlobalLevel(parsed)
 	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stdout}).
 		With().Caller().Timestamp().Logger()
 }
