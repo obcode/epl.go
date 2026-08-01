@@ -54,6 +54,17 @@ type Querier interface {
 	// A timestamp, not a DELETE: the audit log has to keep resolving this token id afterwards.
 	// Idempotent — revoking twice keeps the first moment, which is the one that matters.
 	RevokeToken(ctx context.Context, tokenID string) error
+	// Revokes a token, but only the caller's own.
+	//
+	// Ownership is in the WHERE clause rather than in a read-then-write in Go, which collapses
+	// three things into one: the check cannot race with a concurrent revocation, "no such token"
+	// and "not your token" become the same empty result — the difference is not information the
+	// caller is entitled to — and there is no window in which a token id has been confirmed to
+	// exist before the write is refused.
+	//
+	// COALESCE keeps the first revocation moment. Revoking twice is not an error, and the moment
+	// the audit log needs is the first one.
+	RevokeTokenOfOwner(ctx context.Context, arg RevokeTokenOfOwnerParams) (RevokeTokenOfOwnerRow, error)
 	// Deactivation is how a leaver loses access to everything at once, tokens included.
 	SetPersonActive(ctx context.Context, arg SetPersonActiveParams) error
 	// The authentication query of the token door, in one round trip: the token, its owner and the

@@ -1,0 +1,86 @@
+"""
+A Personal Access Token, as its owner sees it.
+
+The secret is not here and never will be: it exists in memory once, when the token is
+created, and only its SHA-256 hash is stored. A field that could return it would make every
+list of tokens a list of credentials.
+"""
+type PersonalAccessToken {
+  """
+  The public half of the token — the part between the two underscores in `tallox_…_…`.
+
+  Safe to show, safe to log, safe to read out over the phone. It is what the audit log
+  records, which is why revoking a token sets a timestamp instead of deleting the row.
+  """
+  id: ID!
+  "What the owner called it. Shown in the list so that revoking the right one is not guesswork."
+  description: String!
+  "The area:verb grants carried by this token. Enforcement arrives with the `@scope` directive."
+  scopes: [String!]!
+  createdAt: Time!
+  "There is no such thing as a token that does not expire. 90 days by default, 365 at most."
+  expiresAt: Time!
+  """
+  Roughly when this token was last used, or `null` if it never was.
+
+  Deliberately coarse — it is only written when the previous value is more than five minutes
+  old, because a row lock and a WAL write per API call would make the busiest token the
+  slowest one. It answers "is this still in use, can I revoke it", which coarse resolution
+  answers as well as exact resolution would.
+  """
+  lastUsedAt: Time
+  "When it was withdrawn, or `null` while it still works."
+  revokedAt: Time
+}
+
+"""
+A freshly created token: the record, plus the one and only sight of the secret.
+"""
+type CreatedPersonalAccessToken {
+  token: PersonalAccessToken!
+  """
+  The complete token, `tallox_<id>_<secret>`.
+
+  Shown once, here, and never again — the server keeps a hash. Anybody who loses it creates a
+  new one and revokes this one, which is a two-second inconvenience and the reason a database
+  leak is not a credential leak.
+  """
+  secret: String!
+}
+
+extend type Query {
+  """
+  The tokens belonging to the caller.
+
+  Nullable on purpose, and the null is the interesting part: through a Personal Access Token
+  this field answers `null` rather than failing, so a script that asks for it alongside
+  something else still gets the something else. Token management is `@interactiveOnly`
+  because a leaked token that can enumerate and mint its successors outlives its own expiry.
+  """
+  myTokens: [PersonalAccessToken!] @interactiveOnly
+}
+
+type Mutation {
+  """
+  Create a Personal Access Token for the caller.
+
+  The secret comes back exactly once, in the response. Non-null and `@interactiveOnly`, so
+  through the token door this fails outright rather than quietly doing nothing — a write that
+  silently succeeds at nothing is the worse of the two failures.
+  """
+  createPersonalAccessToken(
+    "What it is for, in your own words. Shown in the list; not secret."
+    description: String!
+    "Lifetime in days. 90 if omitted, 365 at most, 1 at least."
+    expiresInDays: Int
+  ): CreatedPersonalAccessToken! @interactiveOnly
+
+  """
+  Withdraw one of your own tokens. Immediate, and irreversible.
+
+  Revoking a token that is already revoked keeps the first moment — that is the one the audit
+  log needs. A token that does not exist and a token belonging to somebody else produce the
+  same refusal, because the difference is not information the caller is entitled to.
+  """
+  revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly
+}

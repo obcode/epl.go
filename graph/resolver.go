@@ -6,7 +6,10 @@
 // cannot differ from the browser path).
 package graph
 
-import "github.com/obcode/tallox.go/internal/buildinfo"
+import (
+	"github.com/obcode/tallox.go/internal/buildinfo"
+	"github.com/obcode/tallox.go/internal/domain"
+)
 
 //go:generate go tool gqlgen generate
 
@@ -15,4 +18,7 @@ import "github.com/obcode/tallox.go/internal/buildinfo"
 // locator, so a test can construct a Resolver with exactly the seams it wants to observe.
 type Resolver struct {
 	Build buildinfo.Info
+	// Tokens is token management. Nil in the handful of tests that only ask for buildInfo —
+	// a resolver that panics on a field nobody exercised is louder than a fake that answers.
+	Tokens *domain.TokenService
 }

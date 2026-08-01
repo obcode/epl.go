@@ -21,10 +21,12 @@ func NewExecutableSchema(cfg Config) graphql.ExecutableSchema {
 type Config = graphql.Config[ResolverRoot, DirectiveRoot, ComplexityRoot]
 
 type ResolverRoot interface {
+	Mutation() MutationResolver
 	Query() QueryResolver
 }
 
 type DirectiveRoot struct {
+	InteractiveOnly func(ctx context.Context, obj any, next graphql.Resolver) (res any, err error)
 }
 
 type ComplexityRoot struct {
@@ -34,6 +36,16 @@ type ComplexityRoot struct {
 		Version func(childComplexity int) int
 	}
 
+	CreatedPersonalAccessToken struct {
+		Secret func(childComplexity int) int
+		Token  func(childComplexity int) int
+	}
+
+	Mutation struct {
+		CreatePersonalAccessToken func(childComplexity int, description string, expiresInDays *int) int
+		RevokePersonalAccessToken func(childComplexity int, id string) int
+	}
+
 	Person struct {
 		ID    func(childComplexity int) int
 		Mail  func(childComplexity int) int
@@ -41,9 +53,20 @@ type ComplexityRoot struct {
 		Roles func(childComplexity int) int
 	}
 
+	PersonalAccessToken struct {
+		CreatedAt   func(childComplexity int) int
+		Description func(childComplexity int) int
+		ExpiresAt   func(childComplexity int) int
+		ID          func(childComplexity int) int
+		LastUsedAt  func(childComplexity int) int
+		RevokedAt   func(childComplexity int) int
+		Scopes      func(childComplexity int) int
+	}
+
 	Query struct {
 		BuildInfo func(childComplexity int) int
 		Me        func(childComplexity int) int
+		MyTokens  func(childComplexity int) int
 	}
 }
 
@@ -80,6 +103,42 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.BuildInfo.Version(childComplexity), true
 
+	case "CreatedPersonalAccessToken.secret":
+		if e.ComplexityRoot.CreatedPersonalAccessToken.Secret == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CreatedPersonalAccessToken.Secret(childComplexity), true
+	case "CreatedPersonalAccessToken.token":
+		if e.ComplexityRoot.CreatedPersonalAccessToken.Token == nil {
+			break
+		}
+
+		return e.ComplexityRoot.CreatedPersonalAccessToken.Token(childComplexity), true
+
+	case "Mutation.createPersonalAccessToken":
+		if e.ComplexityRoot.Mutation.CreatePersonalAccessToken == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createPersonalAccessToken_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.CreatePersonalAccessToken(childComplexity, args["description"].(string), args["expiresInDays"].(*int)), true
+	case "Mutation.revokePersonalAccessToken":
+		if e.ComplexityRoot.Mutation.RevokePersonalAccessToken == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_revokePersonalAccessToken_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.RevokePersonalAccessToken(childComplexity, args["id"].(string)), true
+
 	case "Person.id":
 		if e.ComplexityRoot.Person.ID == nil {
 			break
@@ -105,6 +164,49 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.Person.Roles(childComplexity), true
 
+	case "PersonalAccessToken.createdAt":
+		if e.ComplexityRoot.PersonalAccessToken.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.CreatedAt(childComplexity), true
+	case "PersonalAccessToken.description":
+		if e.ComplexityRoot.PersonalAccessToken.Description == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.Description(childComplexity), true
+	case "PersonalAccessToken.expiresAt":
+		if e.ComplexityRoot.PersonalAccessToken.ExpiresAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.ExpiresAt(childComplexity), true
+	case "PersonalAccessToken.id":
+		if e.ComplexityRoot.PersonalAccessToken.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.ID(childComplexity), true
+	case "PersonalAccessToken.lastUsedAt":
+		if e.ComplexityRoot.PersonalAccessToken.LastUsedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.LastUsedAt(childComplexity), true
+	case "PersonalAccessToken.revokedAt":
+		if e.ComplexityRoot.PersonalAccessToken.RevokedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.RevokedAt(childComplexity), true
+	case "PersonalAccessToken.scopes":
+		if e.ComplexityRoot.PersonalAccessToken.Scopes == nil {
+			break
+		}
+
+		return e.ComplexityRoot.PersonalAccessToken.Scopes(childComplexity), true
+
 	case "Query.buildInfo":
 		if e.ComplexityRoot.Query.BuildInfo == nil {
 			break
@@ -118,6 +220,12 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Query.Me(childComplexity), true
+	case "Query.myTokens":
+		if e.ComplexityRoot.Query.MyTokens == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Query.MyTokens(childComplexity), true
 
 	}
 	return 0, false
@@ -160,6 +268,21 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 
 			return &response
 		}
+	case ast.Mutation:
+		return func(ctx context.Context) *graphql.Response {
+			if !first {
+				return nil
+			}
+			first = false
+			ctx = graphql.WithUnmarshalerMap(ctx, inputUnmarshalMap)
+			data := ec._Mutation(ctx, opCtx.Operation.SelectionSet)
+			var buf bytes.Buffer
+			data.MarshalGQL(&buf)
+
+			return &graphql.Response{
+				Data: buf.Bytes(),
+			}
+		}
 
 	default:
 		return graphql.OneShot(graphql.ErrorResponse(ctx, "unsupported GraphQL operation"))
@@ -186,6 +309,34 @@ func newExecutionContext(
 }
 
 var sources = []*ast.Source{
+	{Name: "../directives.graphqls", Input: `"""
+Not reachable with a Personal Access Token.
+
+A long-lived token in a script is a different risk class from an audited interactive session:
+it enables silent bulk export, and it decouples "who saw this" from any login event. The
+fields behind this directive are the ones where that difference matters — personnel data, the
+unpublished wishes of other people, free-text notes, the audit log, and token management
+itself, because a leaked token that can mint its successors outlives its own expiry date.
+
+Two properties are deliberate.
+
+It is a real directive rather than a check inside each resolver, so that *generated* code
+calls it and no resolver can forget it. A rule that depends on every future author
+remembering it is not a rule.
+
+On a **nullable** field it answers ` + "`" + `null` + "`" + ` instead of failing the operation. A colleague's
+evaluation script asking for a person and their tokens should get the person, not an error
+page — and the schema then documents the boundary itself, because the field is visibly
+nullable. On a non-null field, and on every mutation, it refuses outright: a write that
+silently does nothing is worse than a write that says no.
+"""
+directive @interactiveOnly on FIELD_DEFINITION
+
+"""
+An instant in time, RFC 3339.
+"""
+scalar Time
+`, BuiltIn: false},
 	{Name: "../person.graphqls", Input: `"""
 A role grant.
 
@@ -273,6 +424,93 @@ type Query {
   buildInfo: BuildInfo!
 }
 `, BuiltIn: false},
+	{Name: "../token.graphqls", Input: `"""
+A Personal Access Token, as its owner sees it.
+
+The secret is not here and never will be: it exists in memory once, when the token is
+created, and only its SHA-256 hash is stored. A field that could return it would make every
+list of tokens a list of credentials.
+"""
+type PersonalAccessToken {
+  """
+  The public half of the token — the part between the two underscores in ` + "`" + `tallox_…_…` + "`" + `.
+
+  Safe to show, safe to log, safe to read out over the phone. It is what the audit log
+  records, which is why revoking a token sets a timestamp instead of deleting the row.
+  """
+  id: ID!
+  "What the owner called it. Shown in the list so that revoking the right one is not guesswork."
+  description: String!
+  "The area:verb grants carried by this token. Enforcement arrives with the ` + "`" + `@scope` + "`" + ` directive."
+  scopes: [String!]!
+  createdAt: Time!
+  "There is no such thing as a token that does not expire. 90 days by default, 365 at most."
+  expiresAt: Time!
+  """
+  Roughly when this token was last used, or ` + "`" + `null` + "`" + ` if it never was.
+
+  Deliberately coarse — it is only written when the previous value is more than five minutes
+  old, because a row lock and a WAL write per API call would make the busiest token the
+  slowest one. It answers "is this still in use, can I revoke it", which coarse resolution
+  answers as well as exact resolution would.
+  """
+  lastUsedAt: Time
+  "When it was withdrawn, or ` + "`" + `null` + "`" + ` while it still works."
+  revokedAt: Time
+}
+
+"""
+A freshly created token: the record, plus the one and only sight of the secret.
+"""
+type CreatedPersonalAccessToken {
+  token: PersonalAccessToken!
+  """
+  The complete token, ` + "`" + `tallox_<id>_<secret>` + "`" + `.
+
+  Shown once, here, and never again — the server keeps a hash. Anybody who loses it creates a
+  new one and revokes this one, which is a two-second inconvenience and the reason a database
+  leak is not a credential leak.
+  """
+  secret: String!
+}
+
+extend type Query {
+  """
+  The tokens belonging to the caller.
+
+  Nullable on purpose, and the null is the interesting part: through a Personal Access Token
+  this field answers ` + "`" + `null` + "`" + ` rather than failing, so a script that asks for it alongside
+  something else still gets the something else. Token management is ` + "`" + `@interactiveOnly` + "`" + `
+  because a leaked token that can enumerate and mint its successors outlives its own expiry.
+  """
+  myTokens: [PersonalAccessToken!] @interactiveOnly
+}
+
+type Mutation {
+  """
+  Create a Personal Access Token for the caller.
+
+  The secret comes back exactly once, in the response. Non-null and ` + "`" + `@interactiveOnly` + "`" + `, so
+  through the token door this fails outright rather than quietly doing nothing — a write that
+  silently succeeds at nothing is the worse of the two failures.
+  """
+  createPersonalAccessToken(
+    "What it is for, in your own words. Shown in the list; not secret."
+    description: String!
+    "Lifetime in days. 90 if omitted, 365 at most, 1 at least."
+    expiresInDays: Int
+  ): CreatedPersonalAccessToken! @interactiveOnly
+
+  """
+  Withdraw one of your own tokens. Immediate, and irreversible.
+
+  Revoking a token that is already revoked keeps the first moment — that is the one the audit
+  log needs. A token that does not exist and a token belonging to somebody else produce the
+  same refusal, because the difference is not information the caller is entitled to.
+  """
+  revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly
+}
+`, BuiltIn: false},
 }
 var parsedSchema = gqlparser.MustLoadSchema(sources...)
 
@@ -292,6 +530,16 @@ func (ec *executionContext) childFields_BuildInfo(ctx context.Context, field gra
 	return nil, fmt.Errorf("no field named %q was found under type BuildInfo", field.Name)
 }
 
+func (ec *executionContext) childFields_CreatedPersonalAccessToken(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "token":
+		return ec.fieldContext_CreatedPersonalAccessToken_token(ctx, field)
+	case "secret":
+		return ec.fieldContext_CreatedPersonalAccessToken_secret(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type CreatedPersonalAccessToken", field.Name)
+}
+
 func (ec *executionContext) childFields_Person(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 	switch field.Name {
 	case "id":
@@ -304,6 +552,26 @@ func (ec *executionContext) childFields_Person(ctx context.Context, field graphq
 		return ec.fieldContext_Person_roles(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type Person", field.Name)
+}
+
+func (ec *executionContext) childFields_PersonalAccessToken(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_PersonalAccessToken_id(ctx, field)
+	case "description":
+		return ec.fieldContext_PersonalAccessToken_description(ctx, field)
+	case "scopes":
+		return ec.fieldContext_PersonalAccessToken_scopes(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_PersonalAccessToken_createdAt(ctx, field)
+	case "expiresAt":
+		return ec.fieldContext_PersonalAccessToken_expiresAt(ctx, field)
+	case "lastUsedAt":
+		return ec.fieldContext_PersonalAccessToken_lastUsedAt(ctx, field)
+	case "revokedAt":
+		return ec.fieldContext_PersonalAccessToken_revokedAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type PersonalAccessToken", field.Name)
 }
 
 func (ec *executionContext) childFields___Directive(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
