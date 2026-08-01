@@ -8,63 +8,71 @@ import (
 	"github.com/obcode/tallox.go/internal/policy"
 )
 
-// A freshly created token: the record, plus the one and only sight of the secret.
+// A newly created token: the record, and the one and only sight of the secret.
 type CreatedPersonalAccessToken struct {
+	// The token as it will appear in your list from now on.
 	Token *PersonalAccessToken `json:"token"`
-	// The complete token, `tallox_<id>_<secret>`.
+	// The complete token, `tallox_<id>_<secret>` — put this in your script's environment.
 	//
-	// Shown once, here, and never again — the server keeps a hash. Anybody who loses it creates a
-	// new one and revokes this one, which is a two-second inconvenience and the reason a database
-	// leak is not a credential leak.
+	// Shown once, here, and never again: the server keeps only a checksum. If you lose it, revoke
+	// this token and create another one. That is a two-second inconvenience, and it is the reason
+	// a leak of the database is not a leak of anybody's credentials.
 	Secret string `json:"secret"`
 }
 
+// Everything that changes something.
+//
+// All of it is `@interactiveOnly` for now: writing happens in a signed-in browser session, not
+// through a Personal Access Token.
 type Mutation struct {
 }
 
 // A person in the planning.
 //
-// Deliberately lean. Personnel data — the teaching-load/overtime traffic light, free-text notes —
-// does not hang off this type and never will: it lives in root fields of its own, so that there
-// is no traversal path to it in the first place and the `@interactiveOnly` directive is a second
-// line of defence rather than the only one.
+// Carries identity and roles, nothing else. Teaching load and notes about people are not
+// reachable here — see the `@interactiveOnly` note in the API documentation.
 type Person struct {
 	ID string `json:"id"`
-	// The identity the auth proxy asserts, and the natural key of a person.
+	// The address the university's login asserts. Case-insensitive, and the key we match on.
 	Mail string `json:"mail"`
 	Name string `json:"name"`
-	// The grants this person holds, in a stable order.
+	// The roles this person holds, in a stable order.
 	Roles []policy.Role `json:"roles"`
 }
 
 // A Personal Access Token, as its owner sees it.
 //
-// The secret is not here and never will be: it exists in memory once, when the token is
-// created, and only its SHA-256 hash is stored. A field that could return it would make every
-// list of tokens a list of credentials.
+// The secret is not here and never will be: the server keeps only a checksum of it, so no query
+// can hand it out a second time.
 type PersonalAccessToken struct {
 	// The public half of the token — the part between the two underscores in `tallox_…_…`.
 	//
-	// Safe to show, safe to log, safe to read out over the phone. It is what the audit log
-	// records, which is why revoking a token sets a timestamp instead of deleting the row.
+	// Safe to write down, safe to read out over the phone. It identifies the token in this list
+	// and in the audit log, and it is what you pass to `revokePersonalAccessToken`.
 	ID string `json:"id"`
-	// What the owner called it. Shown in the list so that revoking the right one is not guesswork.
+	// What you called it. Shown in the list, so that revoking the right one is not guesswork.
 	Description string `json:"description"`
-	// The area:verb grants carried by this token. Enforcement arrives with the `@scope` directive.
+	// The `area:verb` grants this token carries.
+	//
+	// Currently informational: every token can do what its owner can. Fine-grained scopes are
+	// planned, and tokens created now will keep working when they arrive.
 	Scopes    []string  `json:"scopes"`
 	CreatedAt time.Time `json:"createdAt"`
-	// There is no such thing as a token that does not expire. 90 days by default, 365 at most.
+	// When this token stops working. There is no token without an expiry: 90 days by default, 365
+	// at most.
 	ExpiresAt time.Time `json:"expiresAt"`
-	// Roughly when this token was last used, or `null` if it never was.
+	// Roughly when the token was last used, or `null` if it never was.
 	//
-	// Deliberately coarse — it is only written when the previous value is more than five minutes
-	// old, because a row lock and a WAL write per API call would make the busiest token the
-	// slowest one. It answers "is this still in use, can I revoke it", which coarse resolution
-	// answers as well as exact resolution would.
+	// Deliberately coarse — it is only updated when the previous value is more than five minutes
+	// old. It answers "is this still in use, can I revoke it", which is what it is for.
 	LastUsedAt *time.Time `json:"lastUsedAt,omitempty"`
 	// When it was withdrawn, or `null` while it still works.
 	RevokedAt *time.Time `json:"revokedAt,omitempty"`
 }
 
+// Everything that can be read.
+//
+// Start with `me` to check that your token works and to see which roles you hold — the roles
+// decide what the rest of these fields answer.
 type Query struct {
 }

@@ -309,96 +309,101 @@ func newExecutionContext(
 }
 
 var sources = []*ast.Source{
-	{Name: "../directives.graphqls", Input: `"""
-Not reachable with a Personal Access Token.
+	{Name: "../directives.graphqls", Input: `# Why a real directive rather than a check inside each resolver: generated code calls it, so
+# no resolver can forget it. A rule that depends on every future author remembering it is not
+# a rule. Implementation in graph/directives.go, decision in policy.MayReadInteractiveOnly.
 
-A long-lived token in a script is a different risk class from an audited interactive session:
-it enables silent bulk export, and it decouples "who saw this" from any login event. The
-fields behind this directive are the ones where that difference matters — personnel data, the
-unpublished wishes of other people, free-text notes, the audit log, and token management
-itself, because a leaked token that can mint its successors outlives its own expiry date.
+"""
+Marks a field that only answers in a signed-in browser session, never through a Personal
+Access Token.
 
-Two properties are deliberate.
+**On a nullable field you get ` + "`" + `null` + "`" + `**, and the rest of your query still answers — so a script
+that asks for something interactive-only alongside other fields keeps the other fields. On a
+field that cannot be null, and on every mutation, the call is refused with the error code
+` + "`" + `INTERACTIVE_ONLY` + "`" + `.
 
-It is a real directive rather than a check inside each resolver, so that *generated* code
-calls it and no resolver can forget it. A rule that depends on every future author
-remembering it is not a rule.
-
-On a **nullable** field it answers ` + "`" + `null` + "`" + ` instead of failing the operation. A colleague's
-evaluation script asking for a person and their tokens should get the person, not an error
-page — and the schema then documents the boundary itself, because the field is visibly
-nullable. On a non-null field, and on every mutation, it refuses outright: a write that
-silently does nothing is worse than a write that says no.
+Behind it: teaching load and overtime, other people's unpublished wishes, free-text notes
+about people, the audit log, and token management itself. A long-lived token in a script is a
+different risk from a login: it makes silent bulk export possible and separates "who saw this"
+from any sign-in. Token management is on the list because a leaked token that can mint its
+successors would outlive its own expiry date.
 """
 directive @interactiveOnly on FIELD_DEFINITION
 
 """
-An instant in time, RFC 3339.
+A moment in time, as an RFC 3339 string — for example ` + "`" + `2026-08-01T14:30:00+02:00` + "`" + `.
+
+Always in Europe/Berlin, the timezone the planning runs in.
 """
 scalar Time
 `, BuiltIn: false},
-	{Name: "../person.graphqls", Input: `"""
-A role grant.
+	{Name: "../person.graphqls", Input: `# Roles are not a ladder — a person holds a set of them, and the same colleague may lead a
+# subject group and a study programme. Every rule in internal/policy therefore asks about the
+# set rather than about "the" role.
 
-Roles are not a ladder. A person holds a set of them — the same colleague may lead a subject
-group and a study programme — so every rule asks about the set rather than about "the" role.
+"""
+A role somebody holds. Everybody holds ` + "`" + `LECTURER` + "`" + `; the others come on top of it.
 
-The values are English; the GUI renders the German terms the faculty uses (Dozent:in,
-Fachgruppenleitung, Studiengangsleitung, Dekanat).
+The values are English. The interface shows the German terms the faculty uses: Dozent:in,
+Fachgruppenleitung, Studiengangsleitung, Dekanat.
 """
 enum Role {
-  "Teaches, maintains a profile and a competence profile, registers interest in instances."
+  "Teaches, keeps a profile and a competence profile, registers interest in instances."
   LECTURER
   "Assigns the instances of one subject group."
   SUBJECT_GROUP_LEAD
   "Declares the demand of one study programme: which instances are needed, and the catalogues."
   PROGRAMME_LEAD
-  "Reads across programmes for the import/export statistics, maintains the teaching-load traffic light."
+  "Reads across programmes for the import/export statistics, keeps the teaching-load traffic light."
   DEANS_OFFICE
-  "Administers users, roles and tokens. Deliberately not a reader of unpublished wishes."
+  "Administers people, roles and tokens. Not a reader of unpublished wishes."
   ADMIN
 }
+
+# Deliberately lean, and it stays that way. Personnel data — the teaching-load traffic light,
+# free-text notes — gets root fields of its own rather than being hung off this type, so that
+# there is no traversal path to it and @interactiveOnly is a second line of defence instead of
+# the only one.
 
 """
 A person in the planning.
 
-Deliberately lean. Personnel data — the teaching-load/overtime traffic light, free-text notes —
-does not hang off this type and never will: it lives in root fields of its own, so that there
-is no traversal path to it in the first place and the ` + "`" + `@interactiveOnly` + "`" + ` directive is a second
-line of defence rather than the only one.
+Carries identity and roles, nothing else. Teaching load and notes about people are not
+reachable here — see the ` + "`" + `@interactiveOnly` + "`" + ` note in the API documentation.
 """
 type Person {
   id: ID!
-  "The identity the auth proxy asserts, and the natural key of a person."
+  "The address the university's login asserts. Case-insensitive, and the key we match on."
   mail: String!
   name: String!
-  "The grants this person holds, in a stable order."
+  "The roles this person holds, in a stable order."
   roles: [Role!]!
 }
 
 extend type Query {
+  # TODO(@scope): needs an explicit @scope(area: PROFILE, verb: READ) once the directive
+  # lands, like every other root field.
   """
-  The authenticated caller, or ` + "`" + `null` + "`" + ` when there is none.
+  Who you are, as far as this server is concerned — or ` + "`" + `null` + "`" + ` if you are not signed in.
 
-  ` + "`" + `null` + "`" + ` rather than an error, because "nobody is logged in" is a normal state that the GUI
-  renders (the login page) rather than an exception it has to catch. It is also the smallest
-  honest answer to "did my credential work": a script that gets a person back knows its token
-  is valid, its owner is active, and which roles it will be judged by — through exactly the
-  same field the browser uses.
-
-  NOTE: once the ` + "`" + `@scope` + "`" + ` directive lands this field needs an explicit
-  ` + "`" + `@scope(area: PROFILE, verb: READ)` + "`" + `, like every other root field.
+  The field to start with when writing a script: getting a person back means the token is
+  valid, its owner is active, and these are the roles the rest of your queries will be judged
+  by. It is the same field the web interface uses, so it cannot answer differently there.
   """
   me: Person
 }
 `, BuiltIn: false},
-	{Name: "../schema.graphqls", Input: `"""
-Version and provenance of the running server instance.
+	{Name: "../schema.graphqls", Input: `# Descriptions in this file are read by two audiences that have nothing to do with each
+# other: colleagues writing their own evaluations — in their editor's completion, and rendered
+# as the reference page in tallox.gui — and whoever maintains this repository.
+#
+# Only the first audience gets a description. Everything the second one needs is a ` + "`" + `#` + "`" + `
+# comment: those never leave the source, because introspection does not report them. Before
+# this rule, notes to ourselves ("once the @scope directive lands …") were showing up in the
+# documentation colleagues read.
 
-Deliberately the smallest possible field: it exists so that the deployed version is visible
-in the GUI footer without reading container tags on the host, and so that both doors
-(` + "`" + `/query` + "`" + ` behind the auth proxy, ` + "`" + `/api/graphql` + "`" + ` behind a bearer token) have something
-harmless to answer during a smoke test.
+"""
+Version and provenance of the running server instance.
 """
 type BuildInfo {
   "Semantic version from the release tag, or ` + "`" + `dev` + "`" + ` in a local build."
@@ -409,17 +414,26 @@ type BuildInfo {
   builtAt: String!
 }
 
+"""
+Everything that can be read.
+
+Start with ` + "`" + `me` + "`" + ` to check that your token works and to see which roles you hold — the roles
+decide what the rest of these fields answer.
+"""
 type Query {
+  # The smallest possible field, on purpose: the deployed version has to be visible in the
+  # GUI footer without reading container tags on the host, and both doors need something
+  # harmless to answer during a smoke test.
+  #
+  # TODO(@scope): needs an explicit @scope(area: PUBLIC, verb: READ) once the directive
+  # lands. The fail-closed CI test — every root field carries a scope or the build breaks —
+  # will point right here.
   """
-  Build stamp of this server.
+  Which version of the server is answering.
 
-  Unauthenticated on purpose. The footer has to render before a session exists, and a smoke
-  test that fails on authorization cannot tell a broken proxy from a broken server.
-
-  NOTE: once the ` + "`" + `@scope` + "`" + ` directive lands this field needs an explicit
-  ` + "`" + `@scope(area: PUBLIC, verb: READ)` + "`" + `. The fail-closed CI test — every root field carries a
-  scope or the build breaks — will point right here, which is why this is a note and not a
-  reminder someone has to remember.
+  Works without authentication, so it is also the simplest way to check that a token, a
+  network route or a proxy is doing what you expect: if this answers and nothing else does,
+  the problem is the credential and not the connection.
   """
   buildInfo: BuildInfo!
 }
@@ -427,32 +441,37 @@ type Query {
 	{Name: "../token.graphqls", Input: `"""
 A Personal Access Token, as its owner sees it.
 
-The secret is not here and never will be: it exists in memory once, when the token is
-created, and only its SHA-256 hash is stored. A field that could return it would make every
-list of tokens a list of credentials.
+The secret is not here and never will be: the server keeps only a checksum of it, so no query
+can hand it out a second time.
 """
 type PersonalAccessToken {
   """
   The public half of the token — the part between the two underscores in ` + "`" + `tallox_…_…` + "`" + `.
 
-  Safe to show, safe to log, safe to read out over the phone. It is what the audit log
-  records, which is why revoking a token sets a timestamp instead of deleting the row.
+  Safe to write down, safe to read out over the phone. It identifies the token in this list
+  and in the audit log, and it is what you pass to ` + "`" + `revokePersonalAccessToken` + "`" + `.
   """
   id: ID!
-  "What the owner called it. Shown in the list so that revoking the right one is not guesswork."
+  "What you called it. Shown in the list, so that revoking the right one is not guesswork."
   description: String!
-  "The area:verb grants carried by this token. Enforcement arrives with the ` + "`" + `@scope` + "`" + ` directive."
+  """
+  The ` + "`" + `area:verb` + "`" + ` grants this token carries.
+
+  Currently informational: every token can do what its owner can. Fine-grained scopes are
+  planned, and tokens created now will keep working when they arrive.
+  """
   scopes: [String!]!
   createdAt: Time!
-  "There is no such thing as a token that does not expire. 90 days by default, 365 at most."
+  """
+  When this token stops working. There is no token without an expiry: 90 days by default, 365
+  at most.
+  """
   expiresAt: Time!
   """
-  Roughly when this token was last used, or ` + "`" + `null` + "`" + ` if it never was.
+  Roughly when the token was last used, or ` + "`" + `null` + "`" + ` if it never was.
 
-  Deliberately coarse — it is only written when the previous value is more than five minutes
-  old, because a row lock and a WAL write per API call would make the busiest token the
-  slowest one. It answers "is this still in use, can I revoke it", which coarse resolution
-  answers as well as exact resolution would.
+  Deliberately coarse — it is only updated when the previous value is more than five minutes
+  old. It answers "is this still in use, can I revoke it", which is what it is for.
   """
   lastUsedAt: Time
   "When it was withdrawn, or ` + "`" + `null` + "`" + ` while it still works."
@@ -460,53 +479,58 @@ type PersonalAccessToken {
 }
 
 """
-A freshly created token: the record, plus the one and only sight of the secret.
+A newly created token: the record, and the one and only sight of the secret.
 """
 type CreatedPersonalAccessToken {
+  "The token as it will appear in your list from now on."
   token: PersonalAccessToken!
   """
-  The complete token, ` + "`" + `tallox_<id>_<secret>` + "`" + `.
+  The complete token, ` + "`" + `tallox_<id>_<secret>` + "`" + ` — put this in your script's environment.
 
-  Shown once, here, and never again — the server keeps a hash. Anybody who loses it creates a
-  new one and revokes this one, which is a two-second inconvenience and the reason a database
-  leak is not a credential leak.
+  Shown once, here, and never again: the server keeps only a checksum. If you lose it, revoke
+  this token and create another one. That is a two-second inconvenience, and it is the reason
+  a leak of the database is not a leak of anybody's credentials.
   """
   secret: String!
 }
 
 extend type Query {
+  # TODO(@scope): needs an explicit @scope(area: TOKENS, verb: READ) once the directive lands.
   """
-  The tokens belonging to the caller.
+  Your own tokens. Never anybody else's.
 
-  Nullable on purpose, and the null is the interesting part: through a Personal Access Token
-  this field answers ` + "`" + `null` + "`" + ` rather than failing, so a script that asks for it alongside
-  something else still gets the something else. Token management is ` + "`" + `@interactiveOnly` + "`" + `
-  because a leaked token that can enumerate and mint its successors outlives its own expiry.
+  ` + "`" + `null` + "`" + ` through a Personal Access Token — see ` + "`" + `@interactiveOnly` + "`" + `. The rest of the query still
+  answers, so this field can be asked for speculatively without breaking anything.
   """
   myTokens: [PersonalAccessToken!] @interactiveOnly
 }
 
+"""
+Everything that changes something.
+
+All of it is ` + "`" + `@interactiveOnly` + "`" + ` for now: writing happens in a signed-in browser session, not
+through a Personal Access Token.
+"""
 type Mutation {
   """
-  Create a Personal Access Token for the caller.
+  Create a Personal Access Token for yourself.
 
-  The secret comes back exactly once, in the response. Non-null and ` + "`" + `@interactiveOnly` + "`" + `, so
-  through the token door this fails outright rather than quietly doing nothing — a write that
-  silently succeeds at nothing is the worse of the two failures.
+  The secret comes back once, in the response. Only in a signed-in browser session: through a
+  token this fails with ` + "`" + `INTERACTIVE_ONLY` + "`" + `, so that a leaked token cannot create its own
+  successors.
   """
   createPersonalAccessToken(
-    "What it is for, in your own words. Shown in the list; not secret."
+    "What it is for, in your own words. Not secret — it is there so you recognise it later."
     description: String!
-    "Lifetime in days. 90 if omitted, 365 at most, 1 at least."
+    "How many days it should live. 90 if you leave this out, 365 at most, 1 at least."
     expiresInDays: Int
   ): CreatedPersonalAccessToken! @interactiveOnly
 
   """
-  Withdraw one of your own tokens. Immediate, and irreversible.
+  Withdraw one of your own tokens. Immediate, and there is no way back.
 
-  Revoking a token that is already revoked keeps the first moment — that is the one the audit
-  log needs. A token that does not exist and a token belonging to somebody else produce the
-  same refusal, because the difference is not information the caller is entitled to.
+  Revoking a token that is already revoked changes nothing and is not an error. A token that
+  does not exist and a token belonging to somebody else produce the same refusal.
   """
   revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly
 }
