@@ -120,11 +120,22 @@ func DefaultConfig() Config {
 // container actually using" is a question asked while standing in front of production.
 func LoadConfig(explicitPath string) (Config, string, error) {
 	v := viper.New()
-	v.SetConfigType("yaml")
 
 	if explicitPath != "" {
+		// An explicit path is taken at its word. The type comes from the extension; a file
+		// named without one is refused rather than guessed at.
 		v.SetConfigFile(explicitPath)
 	} else {
+		// Deliberately no SetConfigType here, and it is not a detail.
+		//
+		// viper only considers an *extensionless* file matching the config name when a type
+		// has been set. In production the working directory is /app, the configuration is
+		// mounted at /app/tallox.yaml — and the server binary is /app/tallox. With a type
+		// set, viper finds the binary first and tries to parse 22 MB of ELF as YAML, so the
+		// container dies on the first start that has a configuration file at all.
+		//
+		// The same trap is in the repository root, where `go build` leaves ./tallox next to
+		// the source.
 		v.SetConfigName(ConfigName)
 		v.AddConfigPath(".")
 		v.AddConfigPath("$HOME")

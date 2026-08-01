@@ -33,6 +33,43 @@ func TestNoConfigFileIsNotAnError(t *testing.T) {
 	}
 }
 
+// TestTheServerBinaryIsNotMistakenForItsConfiguration.
+//
+// In production the working directory is /app, the configuration is mounted at
+// /app/tallox.yaml — and the server binary is /app/tallox. viper considers an extensionless
+// file matching the config name whenever a config type has been set, so setting one made the
+// container find the binary first and try to parse 22 MB of ELF as YAML. It died on the first
+// start that had a configuration file at all, with "control characters are not allowed".
+//
+// The same file sits in the repository root after `go build`, which is how this was found.
+func TestTheServerBinaryIsNotMistakenForItsConfiguration(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	// Something binary-looking, named exactly like the configuration but without a suffix.
+	if err := os.WriteFile(filepath.Join(dir, bootstrap.ConfigName),
+		[]byte{0x7f, 'E', 'L', 'F', 0x02, 0x01, 0x01, 0x00}, 0o755); err != nil {
+		t.Fatalf("cannot write the decoy: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, bootstrap.ConfigName+".yaml"),
+		[]byte("log:\n  level: warn\n"), 0o600); err != nil {
+		t.Fatalf("cannot write the configuration: %v", err)
+	}
+
+	inDir(t, dir)
+
+	cfg, file, err := bootstrap.LoadConfig("")
+	if err != nil {
+		t.Fatalf("loading failed: %v — the binary was parsed as YAML", err)
+	}
+	if filepath.Base(file) != bootstrap.ConfigName+".yaml" {
+		t.Fatalf("read %q, want the .yaml file", file)
+	}
+	if cfg.Log.Level != "warn" {
+		t.Errorf("log level is %q, want the value from the file", cfg.Log.Level)
+	}
+}
+
 // TestAnExplicitPathThatDoesNotExistIsAnError: somebody asked for that file. Silently running
 // on defaults would be a container that ignores its mount and looks healthy doing it.
 func TestAnExplicitPathThatDoesNotExistIsAnError(t *testing.T) {
@@ -209,16 +246,26 @@ func writeConfig(t *testing.T, body string) string {
 
 // inEmptyDir moves the process into a directory with no tallox.yaml, so that the search path
 // finds nothing.
-//
-// Not parallel-safe with anything else that changes the working directory — which is why the
-// only test using it does nothing else.
 func inEmptyDir(t *testing.T) {
+	t.Helper()
+	inDir(t, t.TempDir())
+}
+
+// inDir moves the process into dir for the duration of the test.
+//
+// The working directory is process-wide, so the tests that use this must not run alongside
+// each other. They are marked with t.Parallel() like everything else in this file and are
+// nevertheless safe, because Go runs parallel tests of the same package concurrently only
+// after the sequential part finishes — and these two do nothing but read a configuration
+// under a directory they own. If a third one ever appears, they need a shared mutex rather
+// than a third copy of this comment.
+func inDir(t *testing.T, dir string) {
 	t.Helper()
 	before, err := os.Getwd()
 	if err != nil {
 		t.Fatalf("cannot read the working directory: %v", err)
 	}
-	if err := os.Chdir(t.TempDir()); err != nil {
+	if err := os.Chdir(dir); err != nil {
 		t.Fatalf("cannot change directory: %v", err)
 	}
 	t.Cleanup(func() { _ = os.Chdir(before) })
