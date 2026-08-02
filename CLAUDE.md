@@ -288,7 +288,11 @@ disabled in production.
   CI sets `TALLOX_TEST_DB_REQUIRED=1` so a skipped integration test is a failure rather than
   silently green.
 - **Migrations:** goose, embedded, applied at startup. Steps must be idempotent; never edit
-  or reorder a released migration.
+  or reorder a released migration. The startup path (`MigrateUpDSN`) holds a PostgreSQL
+  advisory lock so that two starting replicas take turns; `Migrate` stays unlocked because the
+  test harness migrates a private schema per test and the lock is database-wide. Note that a
+  concurrency test starting from an *empty* schema proves nothing — goose serialises those by
+  itself on creating its version table.
 - Version is injected via ldflags into `main.version/commit/date`.
 
 ## Testing
