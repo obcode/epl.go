@@ -15,10 +15,12 @@ type PersonalAccessToken {
   "What you called it. Shown in the list, so that revoking the right one is not guesswork."
   description: String!
   """
-  The `area:verb` grants this token carries.
+  The `area:verb` grants this token carries — see the `@scope` directive.
 
-  Currently informational: every token can do what its owner can. Fine-grained scopes are
-  planned, and tokens created now will keep working when they arrive.
+  **An empty list means unrestricted**: the token may do everything its owner's roles allow.
+  Scopes only ever narrow. There is currently no way to choose them when creating a token, so
+  in practice this list is empty; the enforcement is live, and tokens created now keep working
+  when the choice arrives.
   """
   scopes: [String!]!
   createdAt: Time!
@@ -55,14 +57,18 @@ type CreatedPersonalAccessToken {
 }
 
 extend type Query {
-  # TODO(@scope): needs an explicit @scope(area: TOKENS, verb: READ) once the directive lands.
+  # Both annotations, and they are not redundant. @interactiveOnly already makes this
+  # unreachable through a token, so the scope can never be the thing that refuses it — but a
+  # field with no scope is the case the fail-closed default exists for, and "this one does not
+  # need it because another directive covers it" is an exception that stops being true the
+  # first time somebody relaxes the other directive.
   """
   Your own tokens. Never anybody else's.
 
   `null` through a Personal Access Token — see `@interactiveOnly`. The rest of the query still
   answers, so this field can be asked for speculatively without breaking anything.
   """
-  myTokens: [PersonalAccessToken!] @interactiveOnly
+  myTokens: [PersonalAccessToken!] @interactiveOnly @scope(area: TOKENS, verb: READ)
 }
 
 """
@@ -84,7 +90,7 @@ type Mutation {
     description: String!
     "How many days it should live. 90 if you leave this out, 365 at most, 1 at least."
     expiresInDays: Int
-  ): CreatedPersonalAccessToken! @interactiveOnly
+  ): CreatedPersonalAccessToken! @interactiveOnly @scope(area: TOKENS, verb: WRITE)
 
   """
   Withdraw one of your own tokens. Immediate, and there is no way back.
@@ -92,5 +98,5 @@ type Mutation {
   Revoking a token that is already revoked changes nothing and is not an error. A token that
   does not exist and a token belonging to somebody else produce the same refusal.
   """
-  revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly
+  revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly @scope(area: TOKENS, verb: WRITE)
 }

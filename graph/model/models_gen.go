@@ -69,10 +69,12 @@ type PersonalAccessToken struct {
 	ID string `json:"id"`
 	// What you called it. Shown in the list, so that revoking the right one is not guesswork.
 	Description string `json:"description"`
-	// The `area:verb` grants this token carries.
+	// The `area:verb` grants this token carries — see the `@scope` directive.
 	//
-	// Currently informational: every token can do what its owner can. Fine-grained scopes are
-	// planned, and tokens created now will keep working when they arrive.
+	// **An empty list means unrestricted**: the token may do everything its owner's roles allow.
+	// Scopes only ever narrow. There is currently no way to choose them when creating a token, so
+	// in practice this list is empty; the enforcement is live, and tokens created now keep working
+	// when the choice arrives.
 	Scopes    []string  `json:"scopes"`
 	CreatedAt time.Time `json:"createdAt"`
 	// When this token stops working. There is no token without an expiry: 90 days by default, 365

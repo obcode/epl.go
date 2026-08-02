@@ -78,10 +78,10 @@ extend type Query {
   the people who have been deactivated; they are hidden by default because the list is
   otherwise mostly leavers after a few years.
   """
-  people(search: String, includeInactive: Boolean): [Person!] @interactiveOnly
+  people(search: String, includeInactive: Boolean): [Person!] @interactiveOnly @scope(area: ADMIN, verb: READ)
 
   "One person, or `null` if there is nobody with that id."
-  person(id: ID!): Person @interactiveOnly
+  person(id: ID!): Person @interactiveOnly @scope(area: ADMIN, verb: READ)
 
   """
   One person's role grants, expired ones included.
@@ -89,7 +89,7 @@ extend type Query {
   Separate from `Person.roles`, which is the set in force right now. The two answer different
   questions and merging them would lose the one this is for.
   """
-  roleGrants(personId: ID!): [RoleGrant!] @interactiveOnly
+  roleGrants(personId: ID!): [RoleGrant!] @interactiveOnly @scope(area: ADMIN, verb: READ)
 
   """
   Why a given person sees what they see.
@@ -97,7 +97,7 @@ extend type Query {
   Takes the mail address rather than an id, because the question arrives as "Kollegin X says
   she cannot see the demand planning" and the address is what the asker has.
   """
-  diagnoseAccess(mail: String!): AccessDiagnosis @interactiveOnly
+  diagnoseAccess(mail: String!): AccessDiagnosis @interactiveOnly @scope(area: ADMIN, verb: READ)
 }
 
 extend type Mutation {
@@ -112,10 +112,10 @@ extend type Mutation {
   A new person holds no roles. Even LECTURER is granted explicitly, so that who may do what is
   a list somebody wrote rather than a default nobody chose.
   """
-  createPerson(mail: String!, name: String): Person! @interactiveOnly
+  createPerson(mail: String!, name: String): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 
   "Set somebody's display name."
-  renamePerson(id: ID!, name: String!): Person! @interactiveOnly
+  renamePerson(id: ID!, name: String!): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 
   """
   Bring somebody's roles to exactly this set.
@@ -131,7 +131,7 @@ extend type Mutation {
   Refused with `LAST_ADMIN` when it would leave the installation with nobody who can
   administer it.
   """
-  setPersonRoles(id: ID!, roles: [Role!]!, expiresAt: Time): Person! @interactiveOnly
+  setPersonRoles(id: ID!, roles: [Role!]!, expiresAt: Time): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 
   """
   Activate or deactivate somebody.
@@ -142,5 +142,5 @@ extend type Mutation {
   Refused with `LAST_ADMIN` when it would deactivate the last administrator — that is the same
   refusal as taking their ADMIN away, because it has the same consequence.
   """
-  setPersonActive(id: ID!, active: Boolean!): Person! @interactiveOnly
+  setPersonActive(id: ID!, active: Boolean!): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 }

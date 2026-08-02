@@ -16,6 +16,16 @@ model:
   filename: graph/model/models_gen.go
   package: model
 
+# @scope is declared in the schema but never called per field. It is evaluated once per
+# operation in graph/scope.go, because a scope refusal has to reject the whole operation before
+# any resolver runs, and because "a mutation is a write" is a property of the operation and not
+# of a field. Without skip_runtime, gqlgen would generate a DirectiveRoot entry and refuse to
+# build the server until something implemented it — an implementation that would then run in
+# the wrong place. The reasoning in full is in graph/directives.graphqls.
+directives:
+  scope:
+    skip_runtime: true
+
 resolver:
   layout: follow-schema
   dir: graph
@@ -49,6 +59,14 @@ models:
   # two are compared by tests (graph and internal/store).
   Role:
     model: github.com/obcode/tallox.go/internal/policy.Role
+  # Same argument as Role: the scope vocabulary exists in the schema and in internal/policy,
+  # and binding removes the copy. Unlike Role there is no third home — a scope is a string in
+  # a text[] column, not a CHECK constraint — because an older binary has to survive reading a
+  # scope a newer one wrote. See policy.ParseScope.
+  ScopeArea:
+    model: github.com/obcode/tallox.go/internal/policy.ScopeArea
+  ScopeVerb:
+    model: github.com/obcode/tallox.go/internal/policy.ScopeVerb
   # Timestamps travel as RFC 3339 strings. gqlgen's Time scalar does the marshalling, so
   # nothing in the domain has to know about the wire format.
   Time:

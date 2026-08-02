@@ -622,10 +622,10 @@ extend type Query {
   the people who have been deactivated; they are hidden by default because the list is
   otherwise mostly leavers after a few years.
   """
-  people(search: String, includeInactive: Boolean): [Person!] @interactiveOnly
+  people(search: String, includeInactive: Boolean): [Person!] @interactiveOnly @scope(area: ADMIN, verb: READ)
 
   "One person, or ` + "`" + `null` + "`" + ` if there is nobody with that id."
-  person(id: ID!): Person @interactiveOnly
+  person(id: ID!): Person @interactiveOnly @scope(area: ADMIN, verb: READ)
 
   """
   One person's role grants, expired ones included.
@@ -633,7 +633,7 @@ extend type Query {
   Separate from ` + "`" + `Person.roles` + "`" + `, which is the set in force right now. The two answer different
   questions and merging them would lose the one this is for.
   """
-  roleGrants(personId: ID!): [RoleGrant!] @interactiveOnly
+  roleGrants(personId: ID!): [RoleGrant!] @interactiveOnly @scope(area: ADMIN, verb: READ)
 
   """
   Why a given person sees what they see.
@@ -641,7 +641,7 @@ extend type Query {
   Takes the mail address rather than an id, because the question arrives as "Kollegin X says
   she cannot see the demand planning" and the address is what the asker has.
   """
-  diagnoseAccess(mail: String!): AccessDiagnosis @interactiveOnly
+  diagnoseAccess(mail: String!): AccessDiagnosis @interactiveOnly @scope(area: ADMIN, verb: READ)
 }
 
 extend type Mutation {
@@ -656,10 +656,10 @@ extend type Mutation {
   A new person holds no roles. Even LECTURER is granted explicitly, so that who may do what is
   a list somebody wrote rather than a default nobody chose.
   """
-  createPerson(mail: String!, name: String): Person! @interactiveOnly
+  createPerson(mail: String!, name: String): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 
   "Set somebody's display name."
-  renamePerson(id: ID!, name: String!): Person! @interactiveOnly
+  renamePerson(id: ID!, name: String!): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 
   """
   Bring somebody's roles to exactly this set.
@@ -675,7 +675,7 @@ extend type Mutation {
   Refused with ` + "`" + `LAST_ADMIN` + "`" + ` when it would leave the installation with nobody who can
   administer it.
   """
-  setPersonRoles(id: ID!, roles: [Role!]!, expiresAt: Time): Person! @interactiveOnly
+  setPersonRoles(id: ID!, roles: [Role!]!, expiresAt: Time): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 
   """
   Activate or deactivate somebody.
@@ -686,7 +686,7 @@ extend type Mutation {
   Refused with ` + "`" + `LAST_ADMIN` + "`" + ` when it would deactivate the last administrator — that is the same
   refusal as taking their ADMIN away, because it has the same consequence.
   """
-  setPersonActive(id: ID!, active: Boolean!): Person! @interactiveOnly
+  setPersonActive(id: ID!, active: Boolean!): Person! @interactiveOnly @scope(area: ADMIN, verb: WRITE)
 }
 `, BuiltIn: false},
 	{Name: "../directives.graphqls", Input: `# Why a real directive rather than a check inside each resolver: generated code calls it, so
@@ -709,6 +709,105 @@ from any sign-in. Token management is on the list because a leaked token that ca
 successors would outlive its own expiry date.
 """
 directive @interactiveOnly on FIELD_DEFINITION
+
+# Not a runtime directive: ` + "`" + `skip_runtime: true` + "`" + ` in gqlgen.yml keeps it out of the generated
+# DirectiveRoot on purpose, which is the opposite of the choice made for @interactiveOnly one
+# declaration above. Two reasons, and both are about the *operation* rather than the field:
+#
+#   1. A field directive runs when that field resolves, so an operation asking for three root
+#      fields would execute two of them and refuse the third. A credential that may not make
+#      the call should not have made part of it.
+#   2. The structural rule — a mutation is a write, whatever its fields claim — has no field
+#      to hang off. It is a property of the operation type.
+#
+# So the schema declares it, introspection publishes it, and graph/scope.go reads it out of the
+# field definitions in AroundOperations. Declared-but-unenforced is the failure mode that buys;
+# TestEveryRootFieldDeclaresAScope and the enforcement tests are what pay for it.
+
+# The enum values below list their fields, and TestScopeAreasListTheirFields keeps the lists
+# true. That is not decoration: introspection reports directive *declarations* but never
+# directive *usages*, so a schema you fetch has this definition in it and not a single
+# annotation. Without the lists there is no way to discover from the outside which scope a
+# field wants — which is the same reason @interactiveOnly is repeated in field descriptions.
+
+"""
+Which Personal Access Token scope a field requires.
+
+Every field on ` + "`" + `Query` + "`" + ` and ` + "`" + `Mutation` + "`" + ` carries one. A token whose scope list does not cover
+every root field of your operation is refused with the error code ` + "`" + `INSUFFICIENT_SCOPE` + "`" + `, before
+anything runs.
+
+A fetched schema will not show you the annotations — introspection reports that this directive
+exists, but not where it is applied. Each ` + "`" + `ScopeArea` + "`" + ` below therefore lists the fields that
+belong to it.
+
+Two things worth knowing before you mint a token:
+
+- **` + "`" + `WRITE` + "`" + ` includes ` + "`" + `READ` + "`" + ` in the same area**, and nowhere else. There is no scope that covers
+  all areas; a token that needs several lists several.
+- **A token with an empty scope list is not restricted** — it may do everything its owner's
+  roles allow. Scopes only ever narrow, exactly like the role preview does.
+
+A scope never widens anything. Your roles decide what you may see; the scope decides how much
+of that this particular token may reach.
+"""
+directive @scope(
+  "Which part of the API the field belongs to."
+  area: ScopeArea!
+  "Whether reaching the field is a read or a change."
+  verb: ScopeVerb!
+) on FIELD_DEFINITION
+
+"""
+The part of the API a scope refers to.
+
+Deliberately coarse: these are meant to be ticked in a dialog by somebody whose mind is on the
+evaluation script they are about to write.
+"""
+enum ScopeArea {
+  """
+  What answers without an identity. Useful for checking that a route and a credential work
+  when everything else is refused: if this answers and nothing else does, the problem is the
+  token and not the connection.
+
+  Fields: ` + "`" + `buildInfo` + "`" + `.
+  """
+  PUBLIC
+
+  """
+  Your own identity and session: who you are, which roles you hold, and which of them you are
+  being judged by.
+
+  Fields: ` + "`" + `me` + "`" + `, ` + "`" + `session` + "`" + `.
+  """
+  PROFILE
+
+  """
+  Personal Access Token management. Not reachable through a token at all — those fields are
+  ` + "`" + `@interactiveOnly` + "`" + `, so that a leaked token cannot mint its successors.
+
+  Fields: ` + "`" + `myTokens` + "`" + `, ` + "`" + `createPersonalAccessToken` + "`" + `, ` + "`" + `revokePersonalAccessToken` + "`" + `.
+  """
+  TOKENS
+
+  """
+  User and role administration. Also ` + "`" + `@interactiveOnly` + "`" + `, for the same reason.
+
+  Fields: ` + "`" + `people` + "`" + `, ` + "`" + `person` + "`" + `, ` + "`" + `roleGrants` + "`" + `, ` + "`" + `diagnoseAccess` + "`" + `, ` + "`" + `createPerson` + "`" + `, ` + "`" + `renamePerson` + "`" + `,
+  ` + "`" + `setPersonRoles` + "`" + `, ` + "`" + `setPersonActive` + "`" + `.
+  """
+  ADMIN
+}
+
+"""
+Whether a scope permits reading or changing.
+"""
+enum ScopeVerb {
+  "Queries."
+  READ
+  "Mutations — and queries in the same area, because a token that may change something and not look at it is not a capability anybody wants."
+  WRITE
+}
 
 """
 A moment in time, as an RFC 3339 string — for example ` + "`" + `2026-08-01T14:30:00+02:00` + "`" + `.
@@ -761,8 +860,6 @@ type Person {
 }
 
 extend type Query {
-  # TODO(@scope): needs an explicit @scope(area: PROFILE, verb: READ) once the directive
-  # lands, like every other root field.
   """
   Who you are, as far as this server is concerned — or ` + "`" + `null` + "`" + ` if you are not signed in.
 
@@ -770,7 +867,7 @@ extend type Query {
   valid, its owner is active, and these are the roles the rest of your queries will be judged
   by. It is the same field the web interface uses, so it cannot answer differently there.
   """
-  me: Person
+  me: Person @scope(area: PROFILE, verb: READ)
 }
 `, BuiltIn: false},
 	{Name: "../schema.graphqls", Input: `# Descriptions in this file are read by two audiences that have nothing to do with each
@@ -805,9 +902,9 @@ type Query {
   # GUI footer without reading container tags on the host, and both doors need something
   # harmless to answer during a smoke test.
   #
-  # TODO(@scope): needs an explicit @scope(area: PUBLIC, verb: READ) once the directive
-  # lands. The fail-closed CI test — every root field carries a scope or the build breaks —
-  # will point right here.
+  # PUBLIC is the whole area, and this is the field the area exists for: it has to stay
+  # reachable when everything else about a credential is wrong, so that "my token is broken"
+  # and "my route is broken" are distinguishable without a second request.
   """
   Which version of the server is answering.
 
@@ -815,7 +912,7 @@ type Query {
   network route or a proxy is doing what you expect: if this answers and nothing else does,
   the problem is the credential and not the connection.
   """
-  buildInfo: BuildInfo!
+  buildInfo: BuildInfo! @scope(area: PUBLIC, verb: READ)
 }
 `, BuiltIn: false},
 	{Name: "../session.graphqls", Input: `# The difference between "who you are" and "how this request is being judged".
@@ -867,13 +964,20 @@ type Session {
 }
 
 extend type Query {
+  # PROFILE and not PUBLIC, even though it answers for anonymous callers. What it returns for
+  # an authenticated one is the same material as ` + "`" + `me` + "`" + ` plus the role list, so putting it in the
+  # weaker area would mean a token scoped away from PROFILE could still read its owner's
+  # grants — the field would become the way around the scope rather than a description of it.
+  #
+  # The cost is that a token with no PROFILE scope cannot ask "who am I". That is deliberate:
+  # buildInfo is the field for checking that a credential and a route work, and it says so.
   """
   How this request is being judged: identity, effective roles, and whether they were narrowed.
 
   Answers for anonymous callers too, with ` + "`" + `person: null` + "`" + ` and no roles — the interface renders
   a signed-out state from it rather than from a failed query.
   """
-  session: Session!
+  session: Session! @scope(area: PROFILE, verb: READ)
 }
 `, BuiltIn: false},
 	{Name: "../token.graphqls", Input: `"""
@@ -893,10 +997,12 @@ type PersonalAccessToken {
   "What you called it. Shown in the list, so that revoking the right one is not guesswork."
   description: String!
   """
-  The ` + "`" + `area:verb` + "`" + ` grants this token carries.
+  The ` + "`" + `area:verb` + "`" + ` grants this token carries — see the ` + "`" + `@scope` + "`" + ` directive.
 
-  Currently informational: every token can do what its owner can. Fine-grained scopes are
-  planned, and tokens created now will keep working when they arrive.
+  **An empty list means unrestricted**: the token may do everything its owner's roles allow.
+  Scopes only ever narrow. There is currently no way to choose them when creating a token, so
+  in practice this list is empty; the enforcement is live, and tokens created now keep working
+  when the choice arrives.
   """
   scopes: [String!]!
   createdAt: Time!
@@ -933,14 +1039,18 @@ type CreatedPersonalAccessToken {
 }
 
 extend type Query {
-  # TODO(@scope): needs an explicit @scope(area: TOKENS, verb: READ) once the directive lands.
+  # Both annotations, and they are not redundant. @interactiveOnly already makes this
+  # unreachable through a token, so the scope can never be the thing that refuses it — but a
+  # field with no scope is the case the fail-closed default exists for, and "this one does not
+  # need it because another directive covers it" is an exception that stops being true the
+  # first time somebody relaxes the other directive.
   """
   Your own tokens. Never anybody else's.
 
   ` + "`" + `null` + "`" + ` through a Personal Access Token — see ` + "`" + `@interactiveOnly` + "`" + `. The rest of the query still
   answers, so this field can be asked for speculatively without breaking anything.
   """
-  myTokens: [PersonalAccessToken!] @interactiveOnly
+  myTokens: [PersonalAccessToken!] @interactiveOnly @scope(area: TOKENS, verb: READ)
 }
 
 """
@@ -962,7 +1072,7 @@ type Mutation {
     description: String!
     "How many days it should live. 90 if you leave this out, 365 at most, 1 at least."
     expiresInDays: Int
-  ): CreatedPersonalAccessToken! @interactiveOnly
+  ): CreatedPersonalAccessToken! @interactiveOnly @scope(area: TOKENS, verb: WRITE)
 
   """
   Withdraw one of your own tokens. Immediate, and there is no way back.
@@ -970,7 +1080,7 @@ type Mutation {
   Revoking a token that is already revoked changes nothing and is not an error. A token that
   does not exist and a token belonging to somebody else produce the same refusal.
   """
-  revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly
+  revokePersonalAccessToken(id: ID!): PersonalAccessToken! @interactiveOnly @scope(area: TOKENS, verb: WRITE)
 }
 `, BuiltIn: false},
 }

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/obcode/tallox.go/internal/policy"
 	"github.com/vektah/gqlparser/v2/ast"
 )
 
@@ -35,6 +36,40 @@ import (
 // endregion **************************** object.gotpl ****************************
 
 // region    ***************************** type.gotpl *****************************
+
+func (ec *executionContext) unmarshalNScopeArea2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeArea(ctx context.Context, v any) (policy.ScopeArea, error) {
+	tmp, err := graphql.UnmarshalString(v)
+	res := policy.ScopeArea(tmp)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNScopeArea2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeArea(ctx context.Context, sel ast.SelectionSet, v policy.ScopeArea) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalString(string(v))
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
+
+func (ec *executionContext) unmarshalNScopeVerb2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeVerb(ctx context.Context, v any) (policy.ScopeVerb, error) {
+	tmp, err := graphql.UnmarshalString(v)
+	res := policy.ScopeVerb(tmp)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalNScopeVerb2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeVerb(ctx context.Context, sel ast.SelectionSet, v policy.ScopeVerb) graphql.Marshaler {
+	_ = sel
+	res := graphql.MarshalString(string(v))
+	if res == graphql.Null {
+		if !graphql.HasFieldError(ctx, graphql.GetFieldContext(ctx)) {
+			graphql.AddErrorf(ctx, "the requested element is null which the schema does not allow")
+		}
+	}
+	return res
+}
 
 func (ec *executionContext) unmarshalNTime2timeᚐTime(ctx context.Context, v any) (time.Time, error) {
 	res, err := graphql.UnmarshalTime(v)

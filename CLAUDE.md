@@ -143,16 +143,38 @@ third.
 
 ### Scopes
 
-Schema-driven via a `@scope(area:, verb:)` directive, evaluated in `AroundOperations`. A root
-field without `@scope` is treated as `ADMIN:WRITE` (fail-closed) **and fails a CI test**.
+Schema-driven via a `@scope(area:, verb:)` directive, evaluated in `AroundOperations`
+(`graph.EnforceScopes`, decided by `policy.ScopesAllow`). A root field without `@scope` is
+treated as `ADMIN:WRITE` (fail-closed) **and fails `TestEveryRootFieldDeclaresAScope`**.
 
-Two things the sibling project's equivalent gets wrong, which must not be repeated:
+Areas are `PUBLIC`, `PROFILE`, `TOKENS`, `ADMIN`; verbs `READ` and `WRITE`. New areas arrive
+with the fields that need them, not in advance — an area with no field behind it is a promise
+in an enum that colleagues can read via introspection.
 
-1. Its root-field walk ignores inline fragments and fragment spreads, so
+Four things carry this design:
+
+1. **`skip_runtime: true` in `gqlgen.yml`.** Unlike `@interactiveOnly`, `@scope` is *not* a
+   generated directive call. An operation asking for three root fields and permitted two must
+   execute neither, and the structural rule below has no field to hang off. So the schema
+   declares it and `graph/scope.go` reads it out of the field definitions.
+2. Its default direction is fail-closed. The sibling project's is fail-open, which makes its
+   newest endpoints its least protected ones — backwards, because a new endpoint is the one
+   nobody has reviewed.
+3. Its root-field walk ignores inline fragments and fragment spreads, so
    `mutation { ... on Mutation { … } }` yields an empty field list and the write check falls
    through to "not data-changing". Here: recurse into fragments **and** set the structural
-   rule (`Mutation ∨ Subscription ⇒ WRITE`) independently of the walk.
-2. Its default direction is fail-open. Here it is fail-closed.
+   rule (`Mutation ∨ Subscription ⇒ WRITE`) independently of the walk, so neither half alone
+   is load-bearing.
+4. **An empty scope list means unrestricted**, within the owner's roles. Same argument as
+   `policy.Narrow`: the mechanism can only ever remove, so "nothing selected" has to mean
+   "nothing removed". Reading it as "nothing permitted" would make the empty set the most
+   restrictive value of a column whose default is empty, and every existing token would have
+   died on the deploy that shipped it.
+
+Consequence of (4): **the minting path is where scoping becomes real.**
+`createPersonalAccessToken` cannot choose scopes yet, so every token in existence carries an
+empty list and the term does not bite outside tests. Introspection is exempt — it is what makes
+editor completion and codegen work for colleagues, and it is deliberately on in production.
 
 ### `@interactiveOnly`
 
