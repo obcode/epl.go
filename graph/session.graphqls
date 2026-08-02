@@ -47,11 +47,18 @@ type Session {
 }
 
 extend type Query {
+  # PROFILE and not PUBLIC, even though it answers for anonymous callers. What it returns for
+  # an authenticated one is the same material as `me` plus the role list, so putting it in the
+  # weaker area would mean a token scoped away from PROFILE could still read its owner's
+  # grants — the field would become the way around the scope rather than a description of it.
+  #
+  # The cost is that a token with no PROFILE scope cannot ask "who am I". That is deliberate:
+  # buildInfo is the field for checking that a credential and a route work, and it says so.
   """
   How this request is being judged: identity, effective roles, and whether they were narrowed.
 
   Answers for anonymous callers too, with `person: null` and no roles — the interface renders
   a signed-out state from it rather than from a failed query.
   """
-  session: Session!
+  session: Session! @scope(area: PROFILE, verb: READ)
 }

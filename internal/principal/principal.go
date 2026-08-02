@@ -91,9 +91,16 @@ type Actor struct {
 	// narrowing it is supposed to respect.
 	NarrowedFrom []string
 	// Scopes are the area:verb grants of the Personal Access Token used, empty for an
-	// interactive session (where the role alone bounds what is allowed). Enforcement is
-	// schema-driven and arrives with the @scope directive; the field exists now so the
-	// authenticators do not have to change when it does.
+	// interactive session (where the role alone bounds what is allowed).
+	//
+	// Enforced per operation against the @scope annotation on the root fields — see
+	// policy.ScopesAllow and graph.EnforceScopes. Strings rather than a typed slice for the
+	// same reason Roles are: this package sits below the rules and does not interpret them,
+	// so a scope a newer server wrote and this one cannot parse arrives here intact and is
+	// discarded by the rule rather than by the transport.
+	//
+	// An empty list is *not* the empty permission. It means unrestricted within the owner's
+	// roles, exactly as an unnarrowed role set does — scopes can only ever remove.
 	Scopes []string
 	// Kind is how this actor authenticated.
 	Kind Kind

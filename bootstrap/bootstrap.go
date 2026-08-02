@@ -337,6 +337,14 @@ func graphqlHandler(opts Options) http.Handler {
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})
 
+	// The scope check, once per operation, on the one handler both doors share. Unlike
+	// @interactiveOnly this is not a generated directive call — @scope is skip_runtime and read
+	// out of the field definitions here — so forgetting this line would not break loudly. What
+	// catches it instead is bootstrap/scope_test.go, which drives the assembled handler rather
+	// than a hand-wired one, and TestEveryRootFieldDeclaresAScope, which keeps the annotations
+	// this reads from going missing.
+	srv.AroundOperations(graph.EnforceScopes)
+
 	srv.SetQueryCache(lru.New[*ast.QueryDocument](1000))
 
 	// Introspection stays on, in production too. The API is a product: it is what makes

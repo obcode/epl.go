@@ -30,9 +30,9 @@ type Query {
   # GUI footer without reading container tags on the host, and both doors need something
   # harmless to answer during a smoke test.
   #
-  # TODO(@scope): needs an explicit @scope(area: PUBLIC, verb: READ) once the directive
-  # lands. The fail-closed CI test — every root field carries a scope or the build breaks —
-  # will point right here.
+  # PUBLIC is the whole area, and this is the field the area exists for: it has to stay
+  # reachable when everything else about a credential is wrong, so that "my token is broken"
+  # and "my route is broken" are distinguishable without a second request.
   """
   Which version of the server is answering.
 
@@ -40,5 +40,5 @@ type Query {
   network route or a proxy is doing what you expect: if this answers and nothing else does,
   the problem is the credential and not the connection.
   """
-  buildInfo: BuildInfo!
+  buildInfo: BuildInfo! @scope(area: PUBLIC, verb: READ)
 }

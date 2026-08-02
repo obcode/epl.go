@@ -42,8 +42,6 @@ type Person {
 }
 
 extend type Query {
-  # TODO(@scope): needs an explicit @scope(area: PROFILE, verb: READ) once the directive
-  # lands, like every other root field.
   """
   Who you are, as far as this server is concerned — or `null` if you are not signed in.
 
@@ -51,5 +49,5 @@ extend type Query {
   valid, its owner is active, and these are the roles the rest of your queries will be judged
   by. It is the same field the web interface uses, so it cannot answer differently there.
   """
-  me: Person
+  me: Person @scope(area: PROFILE, verb: READ)
 }

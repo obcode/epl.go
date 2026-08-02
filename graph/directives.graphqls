@@ -19,6 +19,72 @@ successors would outlive its own expiry date.
 """
 directive @interactiveOnly on FIELD_DEFINITION
 
+# Not a runtime directive: `skip_runtime: true` in gqlgen.yml keeps it out of the generated
+# DirectiveRoot on purpose, which is the opposite of the choice made for @interactiveOnly one
+# declaration above. Two reasons, and both are about the *operation* rather than the field:
+#
+#   1. A field directive runs when that field resolves, so an operation asking for three root
+#      fields would execute two of them and refuse the third. A credential that may not make
+#      the call should not have made part of it.
+#   2. The structural rule — a mutation is a write, whatever its fields claim — has no field
+#      to hang off. It is a property of the operation type.
+#
+# So the schema declares it, introspection publishes it, and graph/scope.go reads it out of the
+# field definitions in AroundOperations. Declared-but-unenforced is the failure mode that buys;
+# TestEveryRootFieldDeclaresAScope and the enforcement tests are what pay for it.
+
+"""
+Which Personal Access Token scope a field requires.
+
+Every field on `Query` and `Mutation` carries one, and you can read them here or via
+introspection — the annotation is the documentation. A token whose scope list does not cover
+every root field of your operation is refused with the error code `INSUFFICIENT_SCOPE`, before
+anything runs.
+
+Two things worth knowing before you mint a token:
+
+- **`WRITE` includes `READ` in the same area**, and nowhere else. There is no scope that covers
+  all areas; a token that needs several lists several.
+- **A token with an empty scope list is not restricted** — it may do everything its owner's
+  roles allow. Scopes only ever narrow, exactly like the role preview does.
+
+A scope never widens anything. Your roles decide what you may see; the scope decides how much
+of that this particular token may reach.
+"""
+directive @scope(
+  "Which part of the API the field belongs to."
+  area: ScopeArea!
+  "Whether reaching the field is a read or a change."
+  verb: ScopeVerb!
+) on FIELD_DEFINITION
+
+"""
+The part of the API a scope refers to.
+
+Deliberately coarse: these are meant to be ticked in a dialog by somebody whose mind is on the
+evaluation script they are about to write.
+"""
+enum ScopeArea {
+  "What answers without an identity — currently just `buildInfo`. Useful for checking that a route works when everything else is refused."
+  PUBLIC
+  "Your own identity and session: who you are, which roles you hold, which of them you are being judged by."
+  PROFILE
+  "Personal Access Token management. Not reachable through a token at all — those fields are `@interactiveOnly`, so that a leaked token cannot mint its successors."
+  TOKENS
+  "User and role administration. Also `@interactiveOnly`, for the same reason."
+  ADMIN
+}
+
+"""
+Whether a scope permits reading or changing.
+"""
+enum ScopeVerb {
+  "Queries."
+  READ
+  "Mutations — and queries in the same area, because a token that may change something and not look at it is not a capability anybody wants."
+  WRITE
+}
+
 """
 A moment in time, as an RFC 3339 string — for example `2026-08-01T14:30:00+02:00`.
 
