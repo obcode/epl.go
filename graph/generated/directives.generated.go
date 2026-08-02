@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/obcode/tallox.go/graph/model"
 	"github.com/obcode/tallox.go/internal/policy"
 	"github.com/vektah/gqlparser/v2/ast"
 )
@@ -24,6 +25,43 @@ import (
 // endregion **************************** field.gotpl *****************************
 
 // region    **************************** input.gotpl *****************************
+
+func (ec *executionContext) unmarshalInputScopeGrantInput(ctx context.Context, obj any) (model.ScopeGrantInput, error) {
+	var it model.ScopeGrantInput
+	if obj == nil {
+		return it, nil
+	}
+
+	asMap := map[string]any{}
+	for k, v := range obj.(map[string]any) {
+		asMap[k] = v
+	}
+
+	fieldsInOrder := [...]string{"area", "verb"}
+	for _, k := range fieldsInOrder {
+		v, ok := asMap[k]
+		if !ok {
+			continue
+		}
+		switch k {
+		case "area":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("area"))
+			data, err := ec.unmarshalNScopeArea2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeArea(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Area = data
+		case "verb":
+			ctx := graphql.WithPathContext(ctx, graphql.NewPathWithField("verb"))
+			data, err := ec.unmarshalNScopeVerb2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeVerb(ctx, v)
+			if err != nil {
+				return it, err
+			}
+			it.Verb = data
+		}
+	}
+	return it, nil
+}
 
 // endregion **************************** input.gotpl *****************************
 
@@ -52,6 +90,11 @@ func (ec *executionContext) marshalNScopeArea2githubᚗcomᚋobcodeᚋtalloxᚗg
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalNScopeGrantInput2ᚖgithubᚗcomᚋobcodeᚋtalloxᚗgoᚋgraphᚋmodelᚐScopeGrantInput(ctx context.Context, v any) (*model.ScopeGrantInput, error) {
+	res, err := ec.unmarshalInputScopeGrantInput(ctx, v)
+	return &res, graphql.ErrorOnPath(ctx, err)
 }
 
 func (ec *executionContext) unmarshalNScopeVerb2githubᚗcomᚋobcodeᚋtalloxᚗgoᚋinternalᚋpolicyᚐScopeVerb(ctx context.Context, v any) (policy.ScopeVerb, error) {
@@ -85,6 +128,23 @@ func (ec *executionContext) marshalNTime2timeᚐTime(ctx context.Context, sel as
 		}
 	}
 	return res
+}
+
+func (ec *executionContext) unmarshalOScopeGrantInput2ᚕᚖgithubᚗcomᚋobcodeᚋtalloxᚗgoᚋgraphᚋmodelᚐScopeGrantInputᚄ(ctx context.Context, v any) ([]*model.ScopeGrantInput, error) {
+	if v == nil {
+		return nil, nil
+	}
+	vSlice := graphql.CoerceList(v)
+	var err error
+	res := make([]*model.ScopeGrantInput, len(vSlice))
+	for i := range vSlice {
+		ctx := graphql.WithPathContext(ctx, graphql.NewPathWithIndex(i))
+		res[i], err = ec.unmarshalNScopeGrantInput2ᚖgithubᚗcomᚋobcodeᚋtalloxᚗgoᚋgraphᚋmodelᚐScopeGrantInput(ctx, vSlice[i])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return res, nil
 }
 
 func (ec *executionContext) unmarshalOTime2ᚖtimeᚐTime(ctx context.Context, v any) (*time.Time, error) {

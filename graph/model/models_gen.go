@@ -128,6 +128,14 @@ type RoleGrant struct {
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
+// One `area: verb` pair, when creating a token.
+type ScopeGrantInput struct {
+	// Which part of the API. The fields belonging to each area are listed on `ScopeArea`.
+	Area policy.ScopeArea `json:"area"`
+	// `READ` for queries, `WRITE` for mutations — and `WRITE` includes `READ` in the same area.
+	Verb policy.ScopeVerb `json:"verb"`
+}
+
 // One semester, and where its planning stands.
 type Semester struct {
 	ID string `json:"id"`

@@ -7,6 +7,7 @@ import (
 	"github.com/obcode/tallox.go/bootstrap"
 	"github.com/obcode/tallox.go/internal/auth"
 	"github.com/obcode/tallox.go/internal/buildinfo"
+	"github.com/obcode/tallox.go/internal/domain"
 	"github.com/obcode/tallox.go/internal/graphqltest"
 	"github.com/obcode/tallox.go/internal/policy"
 	"github.com/obcode/tallox.go/internal/store"
@@ -21,10 +22,9 @@ const buildInfoQuery = `{ buildInfo { version } }`
 // scopedHandler seeds one persona with a token carrying exactly the given scopes, and returns
 // the handler Serve would build.
 //
-// Scopes are seeded rather than minted, because there is no way to choose them at creation
-// yet. That gap is the reason this file exists: the enforcement is live and the only caller
-// that can currently exercise it is a test, so if the test is missing, the mechanism is
-// unverified until the day somebody depends on it.
+// Seeded rather than minted, so that a case can set a scope the mutation would refuse — an area
+// this build does not know, for instance, which is what an older binary sees after a downgrade.
+// The path through the mutation is covered by TestAMintedTokenIsNarrowedAtTheDoor.
 func scopedHandler(t *testing.T, persona testdata.Persona, scopes []string) http.Handler {
 	t.Helper()
 
@@ -346,5 +346,131 @@ func TestAnAnonymousCallerIsNotScopeRefused(t *testing.T) {
 				t.Errorf("buildInfo.version = %q, want test", out.BuildInfo.Version)
 			}
 		})
+	}
+}
+
+// TestAMintedTokenIsNarrowedAtTheDoor is the whole scope model in one test, end to end.
+//
+// Everything else about scopes is asserted on one half or the other: the domain tests check
+// what gets stored, and the tests above check what a seeded token may reach. This is the only
+// one that mints through the browser door and then spends the result at the token door — the
+// path a colleague actually walks, and the one where a mismatch between "what I ticked" and
+// "what I got" would show up.
+func TestAMintedTokenIsNarrowedAtTheDoor(t *testing.T) {
+	t.Parallel()
+
+	s := storetest.New(t)
+	storetest.SeedPerson(t, s, testdata.Fuenf, string(policy.RoleDeansOffice))
+
+	directory := store.NewDirectory(s.Pool)
+	h := bootstrap.Handler(bootstrap.Options{
+		Build:    buildinfo.Info{Version: "test"},
+		Auth:     auth.Config{Mode: auth.ModeProxy, Users: directory, Tokens: directory},
+		Tokens:   domain.NewTokenService(store.NewTokens(s.Pool), nil),
+		Planning: domain.NewSemesterService(store.NewSemesters(s.Pool)),
+	})
+
+	var minted struct {
+		CreatePersonalAccessToken struct {
+			Secret string `json:"secret"`
+			Token  struct {
+				Scopes []string `json:"scopes"`
+			} `json:"token"`
+		} `json:"createPersonalAccessToken"`
+	}
+	graphqltest.New(h).AsUser(testdata.Fuenf.Mail).MustQuery(t, `
+		mutation {
+			createPersonalAccessToken(
+				description: "Auswertung"
+				scopes: [{ area: PLANNING, verb: READ }]
+			) {
+				secret
+				token { scopes }
+			}
+		}`, nil, &minted)
+
+	created := minted.CreatePersonalAccessToken
+	if len(created.Token.Scopes) != 1 || created.Token.Scopes[0] != "PLANNING:READ" {
+		t.Fatalf("token carries scopes %v, want [PLANNING:READ]", created.Token.Scopes)
+	}
+
+	c := graphqltest.New(h).WithToken(created.Secret)
+
+	t.Run("reaches the area it was minted for", func(t *testing.T) {
+		var out semesterList
+		c.MustQuery(t, semestersQuery, nil, &out)
+	})
+
+	t.Run("and nothing else, although the owner holds the role", func(t *testing.T) {
+		// The dean's office may create a semester. This token may not, and the difference is
+		// the scope alone — which is the point of being able to choose one.
+		resp := c.Do(t, createSemester, map[string]any{"code": "2027S"})
+		assertInsufficientScope(t, resp,
+			policy.Scope{Area: policy.ScopeAreaPlanning, Verb: policy.ScopeVerbWrite})
+	})
+
+	t.Run("not even its owner's own profile", func(t *testing.T) {
+		resp := c.Do(t, meQuery, nil)
+		assertInsufficientScope(t, resp,
+			policy.Scope{Area: policy.ScopeAreaProfile, Verb: policy.ScopeVerbRead})
+	})
+
+	t.Run("but buildInfo, which is the connectivity check", func(t *testing.T) {
+		var out struct {
+			BuildInfo struct {
+				Version string `json:"version"`
+			} `json:"buildInfo"`
+		}
+		c.MustQuery(t, buildInfoQuery, nil, &out)
+	})
+}
+
+// TestAnUnscopedMintStaysUnrestricted is the compatibility half of the same path.
+//
+// Minting without the argument is what somebody who has not thought about scopes does, and it
+// has to keep producing the token they got before the argument existed.
+func TestAnUnscopedMintStaysUnrestricted(t *testing.T) {
+	t.Parallel()
+
+	s := storetest.New(t)
+	storetest.SeedPerson(t, s, testdata.Eins, string(policy.RoleLecturer))
+
+	directory := store.NewDirectory(s.Pool)
+	h := bootstrap.Handler(bootstrap.Options{
+		Build:  buildinfo.Info{Version: "test"},
+		Auth:   auth.Config{Mode: auth.ModeProxy, Users: directory, Tokens: directory},
+		Tokens: domain.NewTokenService(store.NewTokens(s.Pool), nil),
+	})
+
+	var minted struct {
+		CreatePersonalAccessToken struct {
+			Secret string `json:"secret"`
+			Token  struct {
+				Scopes []string `json:"scopes"`
+			} `json:"token"`
+		} `json:"createPersonalAccessToken"`
+	}
+	graphqltest.New(h).AsUser(testdata.Eins.Mail).MustQuery(t, `
+		mutation {
+			createPersonalAccessToken(description: "Auswertung") {
+				secret
+				token { scopes }
+			}
+		}`, nil, &minted)
+
+	if len(minted.CreatePersonalAccessToken.Token.Scopes) != 0 {
+		t.Errorf("scopes = %v, want empty", minted.CreatePersonalAccessToken.Token.Scopes)
+	}
+
+	var out struct {
+		Me *struct {
+			Mail string `json:"mail"`
+		} `json:"me"`
+	}
+	graphqltest.New(h).WithToken(minted.CreatePersonalAccessToken.Secret).
+		MustQuery(t, meQuery, nil, &out)
+
+	if out.Me == nil || out.Me.Mail != testdata.Eins.Mail {
+		t.Errorf("me = %+v, want %s", out.Me, testdata.Eins.Mail)
 	}
 }

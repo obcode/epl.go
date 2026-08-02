@@ -79,6 +79,10 @@ enum ScopeArea {
   when everything else is refused: if this answers and nothing else does, the problem is the
   token and not the connection.
 
+  **A scope list cannot take this away.** What is behind it answers without any credential, so
+  a token scoped away from it would reach less than an anonymous caller — and would lose the
+  one field that tells a broken credential from a broken route. Listing it is never necessary.
+
   Fields: `buildInfo`.
   """
   PUBLIC
@@ -117,6 +121,22 @@ enum ScopeArea {
   `setPersonRoles`, `setPersonActive`.
   """
   ADMIN
+}
+
+# An input type rather than the `AREA:VERB` strings the column stores, and the asymmetry with
+# PersonalAccessToken.scopes below is deliberate. On the way *in* the enums make a typo a query
+# error instead of a scope that is silently discarded — the caller finds out now rather than
+# when their script hits a refusal. On the way *out* the strings are honest: a token may carry a
+# scope a newer server wrote and this one cannot parse, and an enum would fail to marshal it.
+
+"""
+One `area: verb` pair, when creating a token.
+"""
+input ScopeGrantInput {
+  "Which part of the API. The fields belonging to each area are listed on `ScopeArea`."
+  area: ScopeArea!
+  "`READ` for queries, `WRITE` for mutations — and `WRITE` includes `READ` in the same area."
+  verb: ScopeVerb!
 }
 
 """
