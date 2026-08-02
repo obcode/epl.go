@@ -724,13 +724,22 @@ directive @interactiveOnly on FIELD_DEFINITION
 # field definitions in AroundOperations. Declared-but-unenforced is the failure mode that buys;
 # TestEveryRootFieldDeclaresAScope and the enforcement tests are what pay for it.
 
+# The enum values below list their fields, and TestScopeAreasListTheirFields keeps the lists
+# true. That is not decoration: introspection reports directive *declarations* but never
+# directive *usages*, so a schema you fetch has this definition in it and not a single
+# annotation. Without the lists there is no way to discover from the outside which scope a
+# field wants — which is the same reason @interactiveOnly is repeated in field descriptions.
+
 """
 Which Personal Access Token scope a field requires.
 
-Every field on ` + "`" + `Query` + "`" + ` and ` + "`" + `Mutation` + "`" + ` carries one, and you can read them here or via
-introspection — the annotation is the documentation. A token whose scope list does not cover
+Every field on ` + "`" + `Query` + "`" + ` and ` + "`" + `Mutation` + "`" + ` carries one. A token whose scope list does not cover
 every root field of your operation is refused with the error code ` + "`" + `INSUFFICIENT_SCOPE` + "`" + `, before
 anything runs.
+
+A fetched schema will not show you the annotations — introspection reports that this directive
+exists, but not where it is applied. Each ` + "`" + `ScopeArea` + "`" + ` below therefore lists the fields that
+belong to it.
 
 Two things worth knowing before you mint a token:
 
@@ -756,13 +765,37 @@ Deliberately coarse: these are meant to be ticked in a dialog by somebody whose 
 evaluation script they are about to write.
 """
 enum ScopeArea {
-  "What answers without an identity — currently just ` + "`" + `buildInfo` + "`" + `. Useful for checking that a route works when everything else is refused."
+  """
+  What answers without an identity. Useful for checking that a route and a credential work
+  when everything else is refused: if this answers and nothing else does, the problem is the
+  token and not the connection.
+
+  Fields: ` + "`" + `buildInfo` + "`" + `.
+  """
   PUBLIC
-  "Your own identity and session: who you are, which roles you hold, which of them you are being judged by."
+
+  """
+  Your own identity and session: who you are, which roles you hold, and which of them you are
+  being judged by.
+
+  Fields: ` + "`" + `me` + "`" + `, ` + "`" + `session` + "`" + `.
+  """
   PROFILE
-  "Personal Access Token management. Not reachable through a token at all — those fields are ` + "`" + `@interactiveOnly` + "`" + `, so that a leaked token cannot mint its successors."
+
+  """
+  Personal Access Token management. Not reachable through a token at all — those fields are
+  ` + "`" + `@interactiveOnly` + "`" + `, so that a leaked token cannot mint its successors.
+
+  Fields: ` + "`" + `myTokens` + "`" + `, ` + "`" + `createPersonalAccessToken` + "`" + `, ` + "`" + `revokePersonalAccessToken` + "`" + `.
+  """
   TOKENS
-  "User and role administration. Also ` + "`" + `@interactiveOnly` + "`" + `, for the same reason."
+
+  """
+  User and role administration. Also ` + "`" + `@interactiveOnly` + "`" + `, for the same reason.
+
+  Fields: ` + "`" + `people` + "`" + `, ` + "`" + `person` + "`" + `, ` + "`" + `roleGrants` + "`" + `, ` + "`" + `diagnoseAccess` + "`" + `, ` + "`" + `createPerson` + "`" + `, ` + "`" + `renamePerson` + "`" + `,
+  ` + "`" + `setPersonRoles` + "`" + `, ` + "`" + `setPersonActive` + "`" + `.
+  """
   ADMIN
 }
 

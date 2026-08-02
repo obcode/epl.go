@@ -155,6 +155,105 @@ func TestSchemaAndPolicyAgreeOnScopes(t *testing.T) {
 	})
 }
 
+// TestScopeAreasListTheirFields keeps the only discoverable documentation of the annotations
+// true.
+//
+// Introspection reports directive *declarations* and never directive *usages*: a schema
+// fetched with get-graphql-schema — which is how tallox.gui keeps its copy, and how a
+// colleague's codegen sees this API — contains the @scope definition and not one annotation.
+// So from the outside there is no way to tell which scope `me` needs, except that the
+// ScopeArea values say so in prose.
+//
+// Prose that repeats a fact drifts from it. This is what stops that: add a root field, and the
+// area it belongs to has to name it or the build fails.
+func TestScopeAreasListTheirFields(t *testing.T) {
+	t.Parallel()
+
+	schema := generated.NewExecutableSchema(generated.Config{Resolvers: &graph.Resolver{}}).Schema()
+
+	// What the annotations actually say, per area.
+	annotated := map[string]map[string]bool{}
+	for root := range rootTypes(schema) {
+		for _, field := range root.Fields {
+			if strings.HasPrefix(field.Name, "__") {
+				continue
+			}
+			directive := field.Directives.ForName("scope")
+			if directive == nil {
+				continue // TestEveryRootFieldDeclaresAScope reports this one.
+			}
+			area := directive.Arguments.ForName("area")
+			if area == nil {
+				continue
+			}
+			if annotated[area.Value.Raw] == nil {
+				annotated[area.Value.Raw] = map[string]bool{}
+			}
+			annotated[area.Value.Raw][field.Name] = true
+		}
+	}
+
+	enum, ok := schema.Types["ScopeArea"]
+	if !ok {
+		t.Fatal("the schema has no ScopeArea enum — has it been renamed?")
+	}
+
+	for _, value := range enum.EnumValues {
+		listed := backtickedNames(value.Description)
+
+		for field := range annotated[value.Name] {
+			if !listed[field] {
+				t.Errorf("%s is annotated @scope(area: %s) but the description of ScopeArea.%s "+
+					"does not list it.\nThat description is the only place a caller can "+
+					"discover the requirement, because introspection does not report where a "+
+					"directive is applied.", field, value.Name, value.Name)
+			}
+			delete(listed, field)
+		}
+
+		// Whatever is left is a field name the prose claims and the schema does not back. A
+		// renamed or removed field would otherwise keep being advertised.
+		for leftover := range listed {
+			t.Errorf("the description of ScopeArea.%s names `%s`, which is not a root field "+
+				"annotated with that area", value.Name, leftover)
+		}
+	}
+}
+
+// backtickedNames returns the identifiers a description marks up as code.
+//
+// Only names that look like a GraphQL field are considered, so that a description mentioning
+// `@interactiveOnly` or `INSUFFICIENT_SCOPE` does not read as a broken field reference. The
+// cost of that leniency is that a typo in a field name reads as prose rather than as a
+// mistake — which is why the check above runs in both directions.
+func backtickedNames(description string) map[string]bool {
+	out := map[string]bool{}
+
+	parts := strings.Split(description, "`")
+	// Every second part is between a pair of backticks.
+	for i := 1; i < len(parts); i += 2 {
+		name := parts[i]
+		if name == "" || !isLowerCamelIdentifier(name) {
+			continue
+		}
+		out[name] = true
+	}
+	return out
+}
+
+func isLowerCamelIdentifier(s string) bool {
+	if s[0] < 'a' || s[0] > 'z' {
+		return false
+	}
+	for _, r := range s {
+		isLetter := (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z')
+		if !isLetter && (r < '0' || r > '9') {
+			return false
+		}
+	}
+	return true
+}
+
 func assertEnumMatches(t *testing.T, schema *ast.Schema, name string, known []string) {
 	t.Helper()
 
