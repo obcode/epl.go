@@ -1,0 +1,126 @@
+# The first table of the domain, and the spine everything later hangs off: demand, wishes,
+# assignment and the statistics are all "of a semester".
+#
+# Deliberately no start and end dates. The phase is a decision somebody makes and not a
+# consequence of the date — see the description of Phase — and a pair of date columns is an
+# invitation to derive it, which is the one thing this design does not do. When dates are
+# needed for something they are actually for, they can be added; a column is cheap and an
+# accidental dependency is not.
+
+"""
+Where a semester stands in the planning process.
+
+The phase is stored and switched deliberately, never derived from the calendar. Dates slip,
+and a process that moves on because a Tuesday arrived is one nobody trusts — this way the
+switch is an act somebody performs, visibly and at a moment everyone can point at.
+
+A semester moves **one step at a time**, forwards or backwards. Backwards is the correction:
+reopening a plan is a normal thing for a faculty to do, and it should happen in the tool rather
+than around it.
+"""
+enum Phase {
+  "The programme leads declare which instances have to be offered."
+  DEMAND_PLANNING
+  "Lecturers register interest. Entries are confidential until they are published — which is a separate decision, see `wishesPublishedAt`."
+  WISHES
+  "The subject group leads fill the instances."
+  ASSIGNMENT
+  "The plan stands. Changes from here on are corrections, not planning."
+  FINAL
+}
+
+"""
+One semester, and where its planning stands.
+"""
+type Semester {
+  id: ID!
+
+  """
+  The semester in the form `2027S` or `2026W`: four digits and a letter.
+
+  The letter is the term and the digits are the year the term *starts* in, so the winter
+  semester 2026/27 is `2026W`. Sorts chronologically as plain text, which is why it is worth
+  having in a filename or a script rather than the id.
+  """
+  code: String!
+
+  "Where the planning stands."
+  phase: Phase!
+
+  """
+  The phases this semester can be switched to right now — one step away, in either direction.
+
+  Computed from the same rule the mutation enforces, so an interface can render exactly the
+  buttons that will work.
+  """
+  reachablePhases: [Phase!]!
+
+  """
+  When the wishes of this semester became visible to everybody, or `null` while they are still
+  confidential.
+
+  Separate from the phase on purpose, and not tied to it: the wish phase can end without
+  publishing, so that late entries stop while the planners work, and publication can happen
+  while the assignment is already running.
+
+  There is no un-publishing. Once colleagues have seen each other's entries, clearing this
+  would only be a lie about it.
+  """
+  wishesPublishedAt: Time
+
+  "When the semester was entered into the tool — not when the semester itself begins."
+  createdAt: Time!
+
+  "When its phase or its publication state last changed. A repeated `publishWishes` does not move it."
+  updatedAt: Time!
+}
+
+extend type Query {
+  """
+  Every semester, newest first.
+
+  Requires a signed-in identity — like everything except `buildInfo` — but no particular role:
+  which semester is in which phase is the answer to "may I enter my wishes yet", and hiding it
+  would produce a tool that refuses writes without saying why.
+  """
+  semesters: [Semester!]! @scope(area: PLANNING, verb: READ)
+
+  "One semester by its id, or `null` if there is none."
+  semester(id: ID!): Semester @scope(area: PLANNING, verb: READ)
+}
+
+extend type Mutation {
+  """
+  Create a semester, at the start of the process.
+
+  The code is upper-cased and trimmed for you, so `2027s` is accepted. It is not otherwise
+  repaired: `SS2027` is refused rather than guessed at.
+  """
+  createSemester(
+    "Four digits and S or W, for example `2027S`."
+    code: String!
+  ): Semester! @scope(area: PLANNING, verb: WRITE)
+
+  """
+  Move a semester one step through the process, forwards or backwards.
+
+  Only to an adjacent phase — see `reachablePhases`. If somebody else switched the semester
+  between your reading it and this call, you get `PHASE_MOVED_ON` and nothing changes.
+  """
+  advanceSemesterPhase(id: ID!, to: Phase!): Semester! @scope(area: PLANNING, verb: WRITE)
+
+  # @interactiveOnly, unlike the two mutations above, and it is the only asymmetry in this
+  # file. Not because it needs a stronger role — it is the same one — but because it is the
+  # only semester operation that cannot be undone, and it is the moment the confidentiality
+  # rule stops applying. An act that cannot be walked back should be attributable to a sign-in
+  # rather than to a string in a script.
+  """
+  End the confidentiality window: make the wishes of this semester visible to everybody.
+
+  **There is no way back.** Calling it twice is not an error and does not move the timestamp.
+
+  Only in a signed-in browser session: through a Personal Access Token this fails with
+  `INTERACTIVE_ONLY`.
+  """
+  publishWishes(id: ID!): Semester! @interactiveOnly @scope(area: PLANNING, verb: WRITE)
+}

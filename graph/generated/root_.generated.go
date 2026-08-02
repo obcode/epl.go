@@ -51,8 +51,11 @@ type ComplexityRoot struct {
 	}
 
 	Mutation struct {
+		AdvanceSemesterPhase      func(childComplexity int, id string, to policy.Phase) int
 		CreatePerson              func(childComplexity int, mail string, name *string) int
 		CreatePersonalAccessToken func(childComplexity int, description string, expiresInDays *int) int
+		CreateSemester            func(childComplexity int, code string) int
+		PublishWishes             func(childComplexity int, id string) int
 		RenamePerson              func(childComplexity int, id string, name string) int
 		RevokePersonalAccessToken func(childComplexity int, id string) int
 		SetPersonActive           func(childComplexity int, id string, active bool) int
@@ -90,6 +93,8 @@ type ComplexityRoot struct {
 		People         func(childComplexity int, search *string, includeInactive *bool) int
 		Person         func(childComplexity int, id string) int
 		RoleGrants     func(childComplexity int, personID string) int
+		Semester       func(childComplexity int, id string) int
+		Semesters      func(childComplexity int) int
 		Session        func(childComplexity int) int
 	}
 
@@ -98,6 +103,16 @@ type ComplexityRoot struct {
 		GrantedAt func(childComplexity int) int
 		GrantedBy func(childComplexity int) int
 		Role      func(childComplexity int) int
+	}
+
+	Semester struct {
+		Code              func(childComplexity int) int
+		CreatedAt         func(childComplexity int) int
+		ID                func(childComplexity int) int
+		Phase             func(childComplexity int) int
+		ReachablePhases   func(childComplexity int) int
+		UpdatedAt         func(childComplexity int) int
+		WishesPublishedAt func(childComplexity int) int
 	}
 
 	Session struct {
@@ -180,6 +195,17 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 
 		return e.ComplexityRoot.CreatedPersonalAccessToken.Token(childComplexity), true
 
+	case "Mutation.advanceSemesterPhase":
+		if e.ComplexityRoot.Mutation.AdvanceSemesterPhase == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_advanceSemesterPhase_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.AdvanceSemesterPhase(childComplexity, args["id"].(string), args["to"].(policy.Phase)), true
 	case "Mutation.createPerson":
 		if e.ComplexityRoot.Mutation.CreatePerson == nil {
 			break
@@ -202,6 +228,28 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Mutation.CreatePersonalAccessToken(childComplexity, args["description"].(string), args["expiresInDays"].(*int)), true
+	case "Mutation.createSemester":
+		if e.ComplexityRoot.Mutation.CreateSemester == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_createSemester_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.CreateSemester(childComplexity, args["code"].(string)), true
+	case "Mutation.publishWishes":
+		if e.ComplexityRoot.Mutation.PublishWishes == nil {
+			break
+		}
+
+		args, err := ec.field_Mutation_publishWishes_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Mutation.PublishWishes(childComplexity, args["id"].(string)), true
 	case "Mutation.renamePerson":
 		if e.ComplexityRoot.Mutation.RenamePerson == nil {
 			break
@@ -397,6 +445,23 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.Query.RoleGrants(childComplexity, args["personId"].(string)), true
+	case "Query.semester":
+		if e.ComplexityRoot.Query.Semester == nil {
+			break
+		}
+
+		args, err := ec.field_Query_semester_args(ctx, rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.ComplexityRoot.Query.Semester(childComplexity, args["id"].(string)), true
+	case "Query.semesters":
+		if e.ComplexityRoot.Query.Semesters == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Query.Semesters(childComplexity), true
 	case "Query.session":
 		if e.ComplexityRoot.Query.Session == nil {
 			break
@@ -428,6 +493,49 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 		}
 
 		return e.ComplexityRoot.RoleGrant.Role(childComplexity), true
+
+	case "Semester.code":
+		if e.ComplexityRoot.Semester.Code == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.Code(childComplexity), true
+	case "Semester.createdAt":
+		if e.ComplexityRoot.Semester.CreatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.CreatedAt(childComplexity), true
+	case "Semester.id":
+		if e.ComplexityRoot.Semester.ID == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.ID(childComplexity), true
+	case "Semester.phase":
+		if e.ComplexityRoot.Semester.Phase == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.Phase(childComplexity), true
+	case "Semester.reachablePhases":
+		if e.ComplexityRoot.Semester.ReachablePhases == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.ReachablePhases(childComplexity), true
+	case "Semester.updatedAt":
+		if e.ComplexityRoot.Semester.UpdatedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.UpdatedAt(childComplexity), true
+	case "Semester.wishesPublishedAt":
+		if e.ComplexityRoot.Semester.WishesPublishedAt == nil {
+			break
+		}
+
+		return e.ComplexityRoot.Semester.WishesPublishedAt(childComplexity), true
 
 	case "Session.effectiveRoles":
 		if e.ComplexityRoot.Session.EffectiveRoles == nil {
@@ -783,6 +891,17 @@ enum ScopeArea {
   PROFILE
 
   """
+  The planning process: which semesters exist, where each one stands, and — as they arrive —
+  the demand, the assignments and the statistics.
+
+  The first area worth narrowing a token to. ` + "`" + `PUBLIC` + "`" + ` and ` + "`" + `PROFILE` + "`" + ` are you describing
+  yourself; ` + "`" + `TOKENS` + "`" + ` and ` + "`" + `ADMIN` + "`" + ` are unreachable through a token at all.
+
+  Fields: ` + "`" + `semesters` + "`" + `, ` + "`" + `semester` + "`" + `, ` + "`" + `createSemester` + "`" + `, ` + "`" + `advanceSemesterPhase` + "`" + `, ` + "`" + `publishWishes` + "`" + `.
+  """
+  PLANNING
+
+  """
   Personal Access Token management. Not reachable through a token at all — those fields are
   ` + "`" + `@interactiveOnly` + "`" + `, so that a leaked token cannot mint its successors.
 
@@ -913,6 +1032,133 @@ type Query {
   the problem is the credential and not the connection.
   """
   buildInfo: BuildInfo! @scope(area: PUBLIC, verb: READ)
+}
+`, BuiltIn: false},
+	{Name: "../semester.graphqls", Input: `# The first table of the domain, and the spine everything later hangs off: demand, wishes,
+# assignment and the statistics are all "of a semester".
+#
+# Deliberately no start and end dates. The phase is a decision somebody makes and not a
+# consequence of the date — see the description of Phase — and a pair of date columns is an
+# invitation to derive it, which is the one thing this design does not do. When dates are
+# needed for something they are actually for, they can be added; a column is cheap and an
+# accidental dependency is not.
+
+"""
+Where a semester stands in the planning process.
+
+The phase is stored and switched deliberately, never derived from the calendar. Dates slip,
+and a process that moves on because a Tuesday arrived is one nobody trusts — this way the
+switch is an act somebody performs, visibly and at a moment everyone can point at.
+
+A semester moves **one step at a time**, forwards or backwards. Backwards is the correction:
+reopening a plan is a normal thing for a faculty to do, and it should happen in the tool rather
+than around it.
+"""
+enum Phase {
+  "The programme leads declare which instances have to be offered."
+  DEMAND_PLANNING
+  "Lecturers register interest. Entries are confidential until they are published — which is a separate decision, see ` + "`" + `wishesPublishedAt` + "`" + `."
+  WISHES
+  "The subject group leads fill the instances."
+  ASSIGNMENT
+  "The plan stands. Changes from here on are corrections, not planning."
+  FINAL
+}
+
+"""
+One semester, and where its planning stands.
+"""
+type Semester {
+  id: ID!
+
+  """
+  The semester in the form ` + "`" + `2027S` + "`" + ` or ` + "`" + `2026W` + "`" + `: four digits and a letter.
+
+  The letter is the term and the digits are the year the term *starts* in, so the winter
+  semester 2026/27 is ` + "`" + `2026W` + "`" + `. Sorts chronologically as plain text, which is why it is worth
+  having in a filename or a script rather than the id.
+  """
+  code: String!
+
+  "Where the planning stands."
+  phase: Phase!
+
+  """
+  The phases this semester can be switched to right now — one step away, in either direction.
+
+  Computed from the same rule the mutation enforces, so an interface can render exactly the
+  buttons that will work.
+  """
+  reachablePhases: [Phase!]!
+
+  """
+  When the wishes of this semester became visible to everybody, or ` + "`" + `null` + "`" + ` while they are still
+  confidential.
+
+  Separate from the phase on purpose, and not tied to it: the wish phase can end without
+  publishing, so that late entries stop while the planners work, and publication can happen
+  while the assignment is already running.
+
+  There is no un-publishing. Once colleagues have seen each other's entries, clearing this
+  would only be a lie about it.
+  """
+  wishesPublishedAt: Time
+
+  "When the semester was entered into the tool — not when the semester itself begins."
+  createdAt: Time!
+
+  "When its phase or its publication state last changed. A repeated ` + "`" + `publishWishes` + "`" + ` does not move it."
+  updatedAt: Time!
+}
+
+extend type Query {
+  """
+  Every semester, newest first.
+
+  Requires a signed-in identity — like everything except ` + "`" + `buildInfo` + "`" + ` — but no particular role:
+  which semester is in which phase is the answer to "may I enter my wishes yet", and hiding it
+  would produce a tool that refuses writes without saying why.
+  """
+  semesters: [Semester!]! @scope(area: PLANNING, verb: READ)
+
+  "One semester by its id, or ` + "`" + `null` + "`" + ` if there is none."
+  semester(id: ID!): Semester @scope(area: PLANNING, verb: READ)
+}
+
+extend type Mutation {
+  """
+  Create a semester, at the start of the process.
+
+  The code is upper-cased and trimmed for you, so ` + "`" + `2027s` + "`" + ` is accepted. It is not otherwise
+  repaired: ` + "`" + `SS2027` + "`" + ` is refused rather than guessed at.
+  """
+  createSemester(
+    "Four digits and S or W, for example ` + "`" + `2027S` + "`" + `."
+    code: String!
+  ): Semester! @scope(area: PLANNING, verb: WRITE)
+
+  """
+  Move a semester one step through the process, forwards or backwards.
+
+  Only to an adjacent phase — see ` + "`" + `reachablePhases` + "`" + `. If somebody else switched the semester
+  between your reading it and this call, you get ` + "`" + `PHASE_MOVED_ON` + "`" + ` and nothing changes.
+  """
+  advanceSemesterPhase(id: ID!, to: Phase!): Semester! @scope(area: PLANNING, verb: WRITE)
+
+  # @interactiveOnly, unlike the two mutations above, and it is the only asymmetry in this
+  # file. Not because it needs a stronger role — it is the same one — but because it is the
+  # only semester operation that cannot be undone, and it is the moment the confidentiality
+  # rule stops applying. An act that cannot be walked back should be attributable to a sign-in
+  # rather than to a string in a script.
+  """
+  End the confidentiality window: make the wishes of this semester visible to everybody.
+
+  **There is no way back.** Calling it twice is not an error and does not move the timestamp.
+
+  Only in a signed-in browser session: through a Personal Access Token this fails with
+  ` + "`" + `INTERACTIVE_ONLY` + "`" + `.
+  """
+  publishWishes(id: ID!): Semester! @interactiveOnly @scope(area: PLANNING, verb: WRITE)
 }
 `, BuiltIn: false},
 	{Name: "../session.graphqls", Input: `# The difference between "who you are" and "how this request is being judged".
@@ -1184,6 +1430,26 @@ func (ec *executionContext) childFields_RoleGrant(ctx context.Context, field gra
 		return ec.fieldContext_RoleGrant_expiresAt(ctx, field)
 	}
 	return nil, fmt.Errorf("no field named %q was found under type RoleGrant", field.Name)
+}
+
+func (ec *executionContext) childFields_Semester(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+	switch field.Name {
+	case "id":
+		return ec.fieldContext_Semester_id(ctx, field)
+	case "code":
+		return ec.fieldContext_Semester_code(ctx, field)
+	case "phase":
+		return ec.fieldContext_Semester_phase(ctx, field)
+	case "reachablePhases":
+		return ec.fieldContext_Semester_reachablePhases(ctx, field)
+	case "wishesPublishedAt":
+		return ec.fieldContext_Semester_wishesPublishedAt(ctx, field)
+	case "createdAt":
+		return ec.fieldContext_Semester_createdAt(ctx, field)
+	case "updatedAt":
+		return ec.fieldContext_Semester_updatedAt(ctx, field)
+	}
+	return nil, fmt.Errorf("no field named %q was found under type Semester", field.Name)
 }
 
 func (ec *executionContext) childFields_Session(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {

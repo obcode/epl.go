@@ -128,6 +128,38 @@ type RoleGrant struct {
 	ExpiresAt *time.Time `json:"expiresAt,omitempty"`
 }
 
+// One semester, and where its planning stands.
+type Semester struct {
+	ID string `json:"id"`
+	// The semester in the form `2027S` or `2026W`: four digits and a letter.
+	//
+	// The letter is the term and the digits are the year the term *starts* in, so the winter
+	// semester 2026/27 is `2026W`. Sorts chronologically as plain text, which is why it is worth
+	// having in a filename or a script rather than the id.
+	Code string `json:"code"`
+	// Where the planning stands.
+	Phase policy.Phase `json:"phase"`
+	// The phases this semester can be switched to right now — one step away, in either direction.
+	//
+	// Computed from the same rule the mutation enforces, so an interface can render exactly the
+	// buttons that will work.
+	ReachablePhases []policy.Phase `json:"reachablePhases"`
+	// When the wishes of this semester became visible to everybody, or `null` while they are still
+	// confidential.
+	//
+	// Separate from the phase on purpose, and not tied to it: the wish phase can end without
+	// publishing, so that late entries stop while the planners work, and publication can happen
+	// while the assignment is already running.
+	//
+	// There is no un-publishing. Once colleagues have seen each other's entries, clearing this
+	// would only be a lie about it.
+	WishesPublishedAt *time.Time `json:"wishesPublishedAt,omitempty"`
+	// When the semester was entered into the tool — not when the semester itself begins.
+	CreatedAt time.Time `json:"createdAt"`
+	// When its phase or its publication state last changed. A repeated `publishWishes` does not move it.
+	UpdatedAt time.Time `json:"updatedAt"`
+}
+
 // How the current request is being judged.
 //
 // Read this rather than `me` when the question is "what may I do right now": it accounts for a

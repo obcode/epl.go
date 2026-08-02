@@ -40,3 +40,12 @@ type PersonalAccessToken struct {
 	LastUsedAt  pgtype.Timestamptz
 	RevokedAt   pgtype.Timestamptz
 }
+
+type Semester struct {
+	ID                uuid.UUID
+	Code              string
+	Phase             string
+	WishesPublishedAt pgtype.Timestamptz
+	CreatedAt         time.Time
+	UpdatedAt         time.Time
+}

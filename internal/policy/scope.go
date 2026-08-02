@@ -33,6 +33,15 @@ const (
 	// hold, which of them am I being judged by.
 	ScopeAreaProfile ScopeArea = "PROFILE"
 
+	// ScopeAreaPlanning is the planning process itself: which semesters exist, where each one
+	// stands, and — as those tables arrive — the demand, the assignments and the statistics.
+	//
+	// The first area a token can actually be narrowed *to* something useful with. PUBLIC and
+	// PROFILE are the caller describing themselves; TOKENS and ADMIN are unreachable through a
+	// token at all. This is the one where "this token may read the planning and nothing else"
+	// becomes a sentence somebody would want to say.
+	ScopeAreaPlanning ScopeArea = "PLANNING"
+
 	// ScopeAreaTokens is Personal Access Token management.
 	//
 	// A token can never actually reach it — those fields are @interactiveOnly, precisely so
@@ -55,6 +64,7 @@ func AllScopeAreas() []ScopeArea {
 	return []ScopeArea{
 		ScopeAreaPublic,
 		ScopeAreaProfile,
+		ScopeAreaPlanning,
 		ScopeAreaTokens,
 		ScopeAreaAdmin,
 	}
