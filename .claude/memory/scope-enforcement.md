@@ -54,15 +54,43 @@ Argument wie bei `policy.Narrow`: der Mechanismus kann nur wegnehmen, also muss 
 ausgewählt" „nichts weggenommen" heißen. Die andere Lesart hätte beim Deploy jedes existierende
 Token getötet, weil die Spalte per Default leer ist.
 
-## Was daraus folgt: der Mint-Pfad ist die offene Flanke
+## Der Mint-Pfad (seit 2026-08-02 geschlossen)
 
-`createPersonalAccessToken` kann **keine Scopes wählen**. Jedes existierende Token trägt also
-eine leere Liste, und der Term beißt außerhalb der Tests nirgends. Die Durchsetzung ist scharf,
-das Werkzeug zum Verengen fehlt. Nächster Schritt wäre: `scopes:`-Argument an der Mutation,
-Validierung in `internal/domain`, Checkbox-Liste in `tallox.gui/konto/tokens`.
+`createPersonalAccessToken` nimmt `scopes: [ScopeGrantInput!]`. Der richtige Moment war, als
+`PLANNING` existierte: davor bot ein Dialog die Wahl zwischen „alles" und „alles, aber Du darfst
+nicht fragen, wer Du bist" — `TOKENS` und `ADMIN` sind `@interactiveOnly` und für ein Token
+ohnehin unerreichbar.
 
-Wer das baut, entscheidet dabei implizit über die Richtung von (4): sobald man Scopes wählen
-kann, ist „leer" eine bewusste Angabe und nicht mehr nur der Default.
+- **Typisierter Input, untypisierte Ausgabe** — die Asymmetrie ist Absicht. Rein machen die
+  Enums aus einem Tippfehler einen Query-Fehler statt eines still verworfenen Scopes; raus
+  bleiben Strings ehrlich, weil ein Token einen Scope tragen kann, den ein neuerer Server
+  geschrieben hat und ein Enum nicht marshallen könnte.
+- **Scopes werden nicht gegen die Rollen des Besitzers geprüft.** Ein Scope ist eine
+  Selbstbeschränkung, keine Anfrage nach Rechten. Eine Dozentin, die ADMIN:WRITE wählt, bekommt
+  ein Token, das dort nichts erreicht — genau richtig. Eine Prüfung hier wäre ein zweites
+  Rechtemodell und ab dem Tag falsch, an dem sie die Rolle bekommt.
+- **Nach dem Anlegen unveränderlich.** Kein „Scopes bearbeiten": sonst wären das, was die
+  Besitzerin ihrem Token zutraut, und das, was es kann, zwei verschiedene Dinge.
+
+**In der GUI werden nur `PROFILE` und `PLANNING` angeboten** — die einzigen Flächen, die ein
+Token erreichen kann. `UNREACHABLE_AREAS` in `gui/src/lib/scopes.ts` nennt die anderen samt
+Grund, und ein vitest schlägt fehl, sobald eine neue Fläche auf keiner der beiden Listen steht.
+
+**Der Fallstrick in der Oberfläche:** „nichts angekreuzt" und „unbeschränkt" sind für das
+Backend derselbe Wert. Ein Formular, das neben jeder Fläche „kein Zugriff" zeigt und das
+abschickt, prägt das *permissivste* Token überhaupt. Deshalb gibt es die explizite Wahl
+„unbeschränkt / einschränken auf …", und „einschränken" ohne Auswahl wird abgelehnt statt zur
+permissiven Lesart aufgelöst.
+
+## PUBLIC lässt sich nicht wegnehmen
+
+Gefunden beim Schreiben des End-to-End-Tests: ein frisch auf `PLANNING:READ` verengtes Token
+kam nicht an `buildInfo` — es erreichte damit **weniger als ein anonymer Aufrufer** und verlor
+genau das Feld, mit dem man ein kaputtes Credential von einer kaputten Route unterscheidet.
+
+`ScopesAllow` gibt für `ScopeAreaPublic` deshalb immer `true` zurück. Es wird nichts preisgegeben:
+es ist derselbe Versionsstempel, den auch der Unauthentifizierte liest. `TestOnlyPublicIsExempt`
+hält die Ausnahme auf diese eine Fläche begrenzt.
 
 ## Introspection meldet keine Direktiven-*Verwendungen*
 
