@@ -106,6 +106,86 @@ func TestMigrationsSurviveConcurrentMigrators(t *testing.T) {
 	}
 }
 
+// TestTwoStartingServersMigrateTheSameSchemaSafely is the replica case, which is a different
+// question from the one above.
+//
+// TestMigrationsSurviveConcurrentMigrators runs migrators against *different* schemas, so what
+// it exercises is what they share anyway — the extension in public. This one points them at
+// the *same* schema, which is what a deploy does when it starts two API containers: both apply
+// migrations at startup, against one database, at the same moment.
+//
+// It goes through MigrateUpDSN rather than Migrate because that is the difference. MigrateUpDSN
+// is the path a starting server takes and the one that holds the advisory lock; Migrate is
+// deliberately unlocked for the harness. Testing the wrong one here would assert nothing and
+// look like coverage.
+//
+// # The schema has to already know goose, or this test proves nothing
+//
+// It starts from a migrated schema rolled back to zero, rather than from an empty one, and
+// that detail is the test. On a genuinely empty schema goose serialises the migrators by
+// itself: they all queue on creating goose_db_version, because PostgreSQL makes concurrent
+// CREATE TABLE of the same name wait. So the empty case passes with the lock removed and
+// looks like proof.
+//
+// The case that matters has no such accident in it. An installation being upgraded already
+// has goose_db_version, so nothing makes the migrators queue: they all read "these are
+// pending", all begin the same migration, and all but one die on
+//
+//	duplicate key value violates unique constraint "pg_type_typname_nsp_index"  (23505)
+//
+// — a container that exits during a deploy. Verified by removing the lock: five of six
+// migrators fail here, in every round, while the empty-schema version stays green.
+//
+// The assertion is the sum: between them the two runs apply every migration exactly once.
+func TestTwoStartingServersMigrateTheSameSchemaSafely(t *testing.T) {
+	t.Parallel()
+
+	s := storetest.New(t)
+	if err := store.MigrateDown(t.Context(), s.DB); err != nil {
+		t.Fatalf("cannot roll back to set up the pending state: %v", err)
+	}
+
+	type result struct {
+		applied int
+		err     error
+	}
+
+	// A barrier, so the two genuinely overlap rather than passing because the scheduler
+	// happened to run them one after the other.
+	start := make(chan struct{})
+	results := make(chan result, 2)
+
+	for range 2 {
+		go func() {
+			<-start
+			applied, err := store.MigrateUpDSN(context.Background(), s.DSN)
+			results <- result{applied: applied, err: err}
+		}()
+	}
+	close(start)
+
+	total := 0
+	for range 2 {
+		got := <-results
+		if got.err != nil {
+			t.Errorf("a starting server failed to migrate: %v", got.err)
+		}
+		total += got.applied
+	}
+
+	status, err := store.StatusDSN(t.Context(), s.DSN)
+	if err != nil {
+		t.Fatalf("cannot read migration status: %v", err)
+	}
+	if len(status.Pending) != 0 {
+		t.Errorf("%d migrations are still pending: %v", len(status.Pending), status.Pending)
+	}
+	if total != len(status.Applied) {
+		t.Errorf("the two runs applied %d migrations between them, but %d are recorded — "+
+			"they did not take turns", total, len(status.Applied))
+	}
+}
+
 // TestMigrationsAreReversible runs up → down → up.
 //
 // The Down direction is not decoration. It is what makes a rollback on the host something

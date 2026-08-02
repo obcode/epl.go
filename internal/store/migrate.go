@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/pressly/goose/v3"
+	"github.com/pressly/goose/v3/lock"
 
 	// Registers the "pgx" database/sql driver, which is how goose reaches the same database
 	// the pool is bound to.
@@ -25,6 +26,54 @@ func migrationsFS() (fs.FS, error) {
 	return sub, nil
 }
 
+// newProvider builds the goose provider over the embedded migrations.
+//
+// Uses goose's provider API rather than the package-level goose.Up: the package-level
+// functions keep the dialect and the base filesystem in globals, which is fine for a CLI and
+// a race for parallel integration tests, each of which migrates its own throwaway schema.
+func newProvider(sqlDB *sql.DB, opts ...goose.ProviderOption) (*goose.Provider, error) {
+	fsys, err := migrationsFS()
+	if err != nil {
+		return nil, err
+	}
+
+	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys, opts...)
+	if err != nil {
+		return nil, fmt.Errorf("cannot set up migrations: %w", err)
+	}
+	return provider, nil
+}
+
+// exclusively makes a migration run wait for any other process migrating the same database.
+//
+// The case it exists for is a deploy that runs more than one API container. Migrations are
+// applied at startup, so two starting replicas migrate the same database at the same moment,
+// and goose's version table does not make that safe by itself: both read "nothing applied",
+// both begin the same migration, and what they collide on depends on which statement gets
+// there first. The symptom is a container that dies on a schema error during a deploy, which
+// is the worst moment to be reading a stack trace.
+//
+// Today there is exactly one API container, so this never engages. That is the reason to add
+// it now rather than later: the day somebody scales the service for an unrelated reason,
+// nothing about this has to be remembered.
+//
+// A PostgreSQL session-level advisory lock — held on the connection, released when the session
+// ends, so a container killed mid-migration does not leave the next one waiting for a lock
+// nobody holds. Deliberately *not* the row locks used for the last-administrator guard: this
+// has to cover a migration that creates the very tables such a lock would name.
+//
+// Polled every second rather than goose's default five: a replica that has to wait should
+// start a second late, not five. The ceiling stays five minutes, which is far longer than any
+// migration this schema will plausibly grow and still short enough to fail a deploy rather
+// than hang it.
+func exclusively() (goose.ProviderOption, error) {
+	locker, err := lock.NewPostgresSessionLocker(lock.WithLockTimeout(1, 300))
+	if err != nil {
+		return nil, fmt.Errorf("cannot set up the migration lock: %w", err)
+	}
+	return goose.WithSessionLocker(locker), nil
+}
+
 // Migrate applies all pending migrations to whatever schema the handle's search_path points
 // at, and reports how many it applied.
 //
@@ -33,18 +82,15 @@ func migrationsFS() (fs.FS, error) {
 // the list of imports the architecture test confines to internal/store, and confining it is
 // the point.
 //
-// Uses goose's provider API rather than the package-level goose.Up: the package-level
-// functions keep the dialect and the base filesystem in globals, which is fine for a CLI and
-// a race for parallel integration tests, each of which migrates its own throwaway schema.
+// Unlocked, unlike MigrateUpDSN. This is the entry point the integration harness uses, where
+// every test migrates a private schema and there is nothing to serialise — while the advisory
+// lock is database-wide, so it would serialise all of them against each other. That is not
+// merely wasteful: goose polls a lock it cannot get, so a suite of parallel schemas would pay
+// a poll interval per test for a collision that cannot happen.
 func Migrate(ctx context.Context, sqlDB *sql.DB) (int, error) {
-	fsys, err := migrationsFS()
+	provider, err := newProvider(sqlDB)
 	if err != nil {
 		return 0, err
-	}
-
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys)
-	if err != nil {
-		return 0, fmt.Errorf("cannot set up migrations: %w", err)
 	}
 
 	results, err := provider.Up(ctx)
@@ -64,6 +110,9 @@ func Migrate(ctx context.Context, sqlDB *sql.DB) (int, error) {
 // A separate connection rather than the pgxpool the server runs on, because goose speaks
 // database/sql and because a migration should not be holding a pooled connection that request
 // handling is waiting for.
+//
+// This is the path a starting server takes, and therefore the one that takes the lock — see
+// exclusively. Migrate stays unlocked for the harness that migrates private schemas.
 func MigrateUpDSN(ctx context.Context, dsn string) (int, error) {
 	db, err := openMigrationConn(ctx, dsn)
 	if err != nil {
@@ -71,7 +120,20 @@ func MigrateUpDSN(ctx context.Context, dsn string) (int, error) {
 	}
 	defer func() { _ = db.Close() }()
 
-	return Migrate(ctx, db)
+	locked, err := exclusively()
+	if err != nil {
+		return 0, err
+	}
+	provider, err := newProvider(db, locked)
+	if err != nil {
+		return 0, err
+	}
+
+	results, err := provider.Up(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("cannot apply migrations: %w", err)
+	}
+	return len(results), nil
 }
 
 // openMigrationConn is the database/sql handle goose needs, and the reason both DSN-taking
@@ -100,14 +162,9 @@ func openMigrationConn(ctx context.Context, dsn string) (*sql.DB, error) {
 // production process that can undo its own schema is one signal handler away from an
 // incident.
 func MigrateDown(ctx context.Context, sqlDB *sql.DB) error {
-	fsys, err := migrationsFS()
+	provider, err := newProvider(sqlDB)
 	if err != nil {
 		return err
-	}
-
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys)
-	if err != nil {
-		return fmt.Errorf("cannot set up migrations: %w", err)
 	}
 
 	if _, err := provider.DownTo(ctx, 0); err != nil {
@@ -169,15 +226,15 @@ func StatusDSN(ctx context.Context, dsn string) (MigrationStatus, error) {
 }
 
 // Status reports which migrations are applied and which are pending.
+//
+// Unlocked deliberately, even though MigrateUpDSN is not: this only reads, and waiting behind
+// a migration in progress would be the wrong behaviour for the flag that exists to be run in
+// front of a production database. Reading during a deploy answers "somebody is mid-migration",
+// which is information, rather than hanging until they are done.
 func Status(ctx context.Context, sqlDB *sql.DB) (MigrationStatus, error) {
-	fsys, err := migrationsFS()
+	provider, err := newProvider(sqlDB)
 	if err != nil {
 		return MigrationStatus{}, err
-	}
-
-	provider, err := goose.NewProvider(goose.DialectPostgres, sqlDB, fsys)
-	if err != nil {
-		return MigrationStatus{}, fmt.Errorf("cannot set up migrations: %w", err)
 	}
 
 	sources, err := provider.Status(ctx)
