@@ -16,6 +16,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/obcode/tallox.go/internal/auth"
+	"github.com/obcode/tallox.go/internal/policy"
 	"github.com/obcode/tallox.go/internal/principal"
 )
 
@@ -54,6 +55,14 @@ var (
 	ErrNoSuchToken = errors.New("no such token")
 	// ErrNotAuthenticated: the caller has no identity to own a token.
 	ErrNotAuthenticated = errors.New("not authenticated")
+	// ErrScopeUnknown: a scope this build does not recognise. Refused rather than dropped —
+	// silently discarding one would mint a token narrower than the caller asked for, and they
+	// would find out from a refusal in a script weeks later.
+	ErrScopeUnknown = errors.New("unknown scope")
+	// ErrScopeRepeated: the same area:verb twice. Refused rather than deduplicated, because a
+	// list with a repeat in it is a list somebody generated wrongly, and saying so is cheaper
+	// than tidying it up.
+	ErrScopeRepeated = errors.New("a scope may be listed only once")
 )
 
 // TokenRecord is a stored token as its owner may see it. No secret, no hash.
@@ -107,8 +116,20 @@ func NewTokenService(store TokenStore, now func() time.Time) *TokenService {
 // omission is the design. Handing a colleague a credential they did not generate makes the
 // audit log a record of who *issued* rather than who *acted*, and it is the shape every
 // "temporary" administrative shortcut takes.
+//
+// # Scopes
+//
+// An empty or nil list stores an empty list, which policy.ScopesAllow reads as unrestricted
+// within the owner's roles. That is the pre-existing default and it stays the default: scopes
+// only ever narrow, so "nothing selected" has to mean "nothing removed".
+//
+// They are not checked against what the caller may actually do, and that is not an oversight.
+// A scope is a restriction the holder puts on their own credential; asking for TOKENS:WRITE
+// while holding no ADMIN grant produces a token that can reach nothing there, which is exactly
+// what it should produce. Validating it here would be a second permission model, and it would
+// go wrong the day somebody is granted a role after minting the token.
 func (s *TokenService) Create(ctx context.Context, actor principal.Actor,
-	description string, expiresInDays *int,
+	description string, expiresInDays *int, scopes []policy.Scope,
 ) (CreatedToken, error) {
 	if !actor.Authenticated() {
 		return CreatedToken{}, ErrNotAuthenticated
@@ -133,18 +154,44 @@ func (s *TokenService) Create(ctx context.Context, actor principal.Actor,
 		return CreatedToken{}, ErrLifetimeOutOfRange
 	}
 
+	stored, err := storedScopes(scopes)
+	if err != nil {
+		return CreatedToken{}, err
+	}
+
 	minted, err := auth.Mint()
 	if err != nil {
 		return CreatedToken{}, fmt.Errorf("cannot generate a token: %w", err)
 	}
 
 	record, err := s.store.CreateToken(ctx, minted.ID, actor.ID, minted.SecretHash,
-		description, []string{}, s.now().AddDate(0, 0, days))
+		description, stored, s.now().AddDate(0, 0, days))
 	if err != nil {
 		return CreatedToken{}, fmt.Errorf("cannot store the token: %w", err)
 	}
 
 	return CreatedToken{Record: record, Plaintext: minted.Plaintext}, nil
+}
+
+// storedScopes turns the requested scopes into the form the column holds.
+//
+// Never nil: the store writes a text[] and the column is NOT NULL, and an empty slice and a nil
+// one would otherwise reach it as different values for the same intent.
+func storedScopes(scopes []policy.Scope) ([]string, error) {
+	out := make([]string, 0, len(scopes))
+
+	seen := make(map[policy.Scope]bool, len(scopes))
+	for _, scope := range scopes {
+		if !scope.Valid() {
+			return nil, fmt.Errorf("%w: %s", ErrScopeUnknown, scope)
+		}
+		if seen[scope] {
+			return nil, fmt.Errorf("%w: %s", ErrScopeRepeated, scope)
+		}
+		seen[scope] = true
+		out = append(out, scope.String())
+	}
+	return out, nil
 }
 
 // List returns the caller's own tokens, newest first.

@@ -27,6 +27,10 @@ const (
 	// ScopeAreaPublic is what answers without an identity: the build info. Its purpose is to
 	// stay reachable when everything else is refused, so that "my token is broken" and "the
 	// route is broken" are distinguishable from the client side.
+	//
+	// It is the one area a scope list cannot narrow away — see ScopesAllow. Listing it is
+	// therefore never necessary and never wrong; the enum value exists so that the fields
+	// behind it are annotated and documented like every other root field.
 	ScopeAreaPublic ScopeArea = "PUBLIC"
 
 	// ScopeAreaProfile is the caller's own identity and session: who am I, which roles do I
@@ -205,6 +209,19 @@ func ScopesAllow(a principal.Actor, want Scope) bool {
 		return true
 	}
 	if len(a.Scopes) == 0 {
+		return true
+	}
+
+	// PUBLIC cannot be narrowed away, and the reason is not convenience. What is behind it
+	// answers without any credential at all, so refusing it to a scoped token would hand its
+	// holder *less* than an anonymous caller gets — and the one field there exists precisely to
+	// answer when everything else is refused. A token whose diagnosis field is scoped off is a
+	// token whose owner cannot tell a broken credential from a broken route.
+	//
+	// Nothing is given away by this: it is the same build stamp the unauthenticated caller
+	// reads. Found by TestAMintedTokenIsNarrowedAtTheDoor, which minted a PLANNING-only token
+	// and could not ask the server for its version.
+	if want.Area == ScopeAreaPublic {
 		return true
 	}
 

@@ -11,6 +11,7 @@ import (
 
 	"github.com/obcode/tallox.go/internal/auth"
 	"github.com/obcode/tallox.go/internal/domain"
+	"github.com/obcode/tallox.go/internal/policy"
 	"github.com/obcode/tallox.go/internal/principal"
 	"github.com/obcode/tallox.go/internal/testdata"
 )
@@ -35,6 +36,7 @@ type createdCall struct {
 	ownerID     uuid.UUID
 	secretHash  []byte
 	description string
+	scopes      []string
 	expiresAt   time.Time
 }
 
@@ -49,7 +51,8 @@ func (f *fakeStore) CreateToken(_ context.Context, tokenID string, ownerID uuid.
 	if f.createErr != nil {
 		return domain.TokenRecord{}, f.createErr
 	}
-	f.created = append(f.created, createdCall{tokenID, ownerID, secretHash, description, expiresAt})
+	f.created = append(f.created,
+		createdCall{tokenID, ownerID, secretHash, description, scopes, expiresAt})
 	return domain.TokenRecord{
 		ID:          tokenID,
 		Description: description,
@@ -91,7 +94,7 @@ func TestCreatedTokensAreUsableAndStoredAsAHash(t *testing.T) {
 	store := &fakeStore{}
 	actor := testdata.Eins.Actor(principal.KindInteractive, "LECTURER")
 
-	created, err := service(store).Create(t.Context(), actor, "Auswertung", nil)
+	created, err := service(store).Create(t.Context(), actor, "Auswertung", nil, nil)
 	if err != nil {
 		t.Fatalf("cannot create: %v", err)
 	}
@@ -149,7 +152,7 @@ func TestLifetimes(t *testing.T) {
 			store := &fakeStore{}
 			actor := testdata.Eins.Actor(principal.KindInteractive, "LECTURER")
 
-			_, err := service(store).Create(t.Context(), actor, "Auswertung", tc.request)
+			_, err := service(store).Create(t.Context(), actor, "Auswertung", tc.request, nil)
 
 			if tc.wantErr != nil {
 				if !errors.Is(err, tc.wantErr) {
@@ -194,7 +197,7 @@ func TestDescriptionsAreRequiredAndBounded(t *testing.T) {
 			t.Parallel()
 
 			store := &fakeStore{}
-			_, err := service(store).Create(t.Context(), actor, tc.description, nil)
+			_, err := service(store).Create(t.Context(), actor, tc.description, nil, nil)
 
 			if tc.wantErr == nil {
 				if err != nil {
@@ -210,7 +213,7 @@ func TestDescriptionsAreRequiredAndBounded(t *testing.T) {
 
 	// Trimmed on the way in, so a leading space is not a second, different description.
 	store := &fakeStore{}
-	if _, err := service(store).Create(t.Context(), actor, "  CI-Lauf  ", nil); err != nil {
+	if _, err := service(store).Create(t.Context(), actor, "  CI-Lauf  ", nil, nil); err != nil {
 		t.Fatalf("cannot create: %v", err)
 	}
 	if store.created[0].description != "CI-Lauf" {
@@ -251,7 +254,7 @@ func TestAnonymousCallersOwnNothing(t *testing.T) {
 	store := &fakeStore{}
 	s := service(store)
 
-	if _, err := s.Create(t.Context(), principal.Anonymous, "x", nil); !errors.Is(err, domain.ErrNotAuthenticated) {
+	if _, err := s.Create(t.Context(), principal.Anonymous, "x", nil, nil); !errors.Is(err, domain.ErrNotAuthenticated) {
 		t.Errorf("Create: %v", err)
 	}
 	if _, err := s.List(t.Context(), principal.Anonymous); !errors.Is(err, domain.ErrNotAuthenticated) {
@@ -262,5 +265,133 @@ func TestAnonymousCallersOwnNothing(t *testing.T) {
 	}
 	if len(store.created)+len(store.revoked) != 0 {
 		t.Error("an anonymous caller reached the store")
+	}
+}
+
+// TestScopesAreStoredAsTheyWereAsked covers the whole of the minting side of the scope model.
+//
+// Written as one table because the cases are each other's context: the empty list is not a
+// degenerate case of the others but the *default*, and reading it next to the narrowing ones is
+// what makes that visible.
+func TestScopesAreStoredAsTheyWereAsked(t *testing.T) {
+	t.Parallel()
+
+	planningRead := policy.Scope{Area: policy.ScopeAreaPlanning, Verb: policy.ScopeVerbRead}
+	planningWrite := policy.Scope{Area: policy.ScopeAreaPlanning, Verb: policy.ScopeVerbWrite}
+	profileRead := policy.Scope{Area: policy.ScopeAreaProfile, Verb: policy.ScopeVerbRead}
+
+	tests := []struct {
+		name    string
+		scopes  []policy.Scope
+		want    []string
+		wantErr error
+	}{
+		{
+			name: "nothing asked for is an unrestricted token",
+			// The pre-existing default, and it stays the default. Scopes only ever narrow, so
+			// "nothing selected" has to mean "nothing removed" — the other reading would have
+			// made every token minted before this feature stop working.
+			scopes: nil,
+			want:   []string{},
+		},
+		{
+			name:   "an empty list is the same thing",
+			scopes: []policy.Scope{},
+			want:   []string{},
+		},
+		{
+			name:   "one scope",
+			scopes: []policy.Scope{planningRead},
+			want:   []string{"PLANNING:READ"},
+		},
+		{
+			name: "several, in the order they were given",
+			// Not sorted. The stored order is what the owner will see in their token list, and
+			// re-ordering it would make the list disagree with what they ticked.
+			scopes: []policy.Scope{planningWrite, profileRead},
+			want:   []string{"PLANNING:WRITE", "PROFILE:READ"},
+		},
+		{
+			name: "read and write of the same area, which is redundant but not wrong",
+			// WRITE already implies READ, so this is one entry too many — and it is not this
+			// layer's business to tidy it up. Refusing it would make a dialogue that ticks both
+			// boxes an error, and that dialogue is a reasonable thing to build.
+			scopes: []policy.Scope{planningRead, planningWrite},
+			want:   []string{"PLANNING:READ", "PLANNING:WRITE"},
+		},
+		{
+			name:    "the same scope twice",
+			scopes:  []policy.Scope{planningRead, planningRead},
+			wantErr: domain.ErrScopeRepeated,
+		},
+		{
+			name:    "an area this build does not know",
+			scopes:  []policy.Scope{{Area: "WISHES", Verb: policy.ScopeVerbRead}},
+			wantErr: domain.ErrScopeUnknown,
+		},
+		{
+			name:    "a verb this build does not know",
+			scopes:  []policy.Scope{{Area: policy.ScopeAreaPlanning, Verb: "DELETE"}},
+			wantErr: domain.ErrScopeUnknown,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			store := &fakeStore{}
+			actor := testdata.Eins.Actor(principal.KindInteractive, "LECTURER")
+
+			_, err := service(store).Create(t.Context(), actor, "Auswertung", nil, tt.scopes)
+
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Fatalf("err = %v, want %v", err, tt.wantErr)
+				}
+				if len(store.created) != 0 {
+					t.Errorf("a refused request still stored %d tokens", len(store.created))
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("cannot create: %v", err)
+			}
+			if len(store.created) != 1 {
+				t.Fatalf("stored %d tokens", len(store.created))
+			}
+			got := store.created[0].scopes
+			if got == nil {
+				t.Fatal("stored nil scopes — the column is NOT NULL")
+			}
+			if strings.Join(got, ",") != strings.Join(tt.want, ",") {
+				t.Errorf("stored %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+// TestScopesAreNotCheckedAgainstTheOwnersRoles pins a decision that reads like a gap.
+//
+// A scope is a restriction somebody puts on their own credential, not a permission they are
+// asking for. A lecturer minting an ADMIN-scoped token gets a token that reaches nothing in
+// that area — the role check refuses it, exactly as it refuses the lecturer herself. Validating
+// here would be a second permission model, and it would be wrong the day she is granted the
+// role after minting the token.
+func TestScopesAreNotCheckedAgainstTheOwnersRoles(t *testing.T) {
+	t.Parallel()
+
+	store := &fakeStore{}
+	lecturer := testdata.Eins.Actor(principal.KindInteractive, string(policy.RoleLecturer))
+
+	_, err := service(store).Create(t.Context(), lecturer, "Auswertung", nil,
+		[]policy.Scope{{Area: policy.ScopeAreaAdmin, Verb: policy.ScopeVerbWrite}})
+	if err != nil {
+		t.Fatalf("minting a scope the owner cannot use is not an error, but it failed: %v", err)
+	}
+
+	if got := store.created[0].scopes; strings.Join(got, ",") != "ADMIN:WRITE" {
+		t.Errorf("stored %v, want ADMIN:WRITE", got)
 	}
 }

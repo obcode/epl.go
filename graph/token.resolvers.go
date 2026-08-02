@@ -14,8 +14,9 @@ import (
 )
 
 // CreatePersonalAccessToken is the resolver for the createPersonalAccessToken field.
-func (r *mutationResolver) CreatePersonalAccessToken(ctx context.Context, description string, expiresInDays *int) (*model.CreatedPersonalAccessToken, error) {
-	created, err := r.Tokens.Create(ctx, principal.From(ctx), description, expiresInDays)
+func (r *mutationResolver) CreatePersonalAccessToken(ctx context.Context, description string, expiresInDays *int, scopes []*model.ScopeGrantInput) (*model.CreatedPersonalAccessToken, error) {
+	created, err := r.Tokens.Create(ctx, principal.From(ctx), description, expiresInDays,
+		requestedScopes(scopes))
 	if err != nil {
 		return nil, userFacing(err)
 	}

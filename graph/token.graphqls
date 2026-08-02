@@ -90,6 +90,22 @@ type Mutation {
     description: String!
     "How many days it should live. 90 if you leave this out, 365 at most, 1 at least."
     expiresInDays: Int
+    """
+    What this token may reach. **Leave it out and the token is unrestricted** — it can do
+    everything your roles allow.
+
+    A scope only ever narrows. Listing `PLANNING: READ` gives you a token that reads the
+    planning and nothing else, however much your roles would otherwise permit; it cannot give
+    you anything you do not already hold.
+
+    Which fields belong to which area is listed on `ScopeArea`. `WRITE` includes `READ` in the
+    same area, so a token that reads and writes the planning needs one entry, not two.
+
+    Fixed at creation. There is no way to change the scopes of an existing token — mint a new
+    one and revoke this one, so that what the holder believes it can do and what it can do are
+    never two different things.
+    """
+    scopes: [ScopeGrantInput!]
   ): CreatedPersonalAccessToken! @interactiveOnly @scope(area: TOKENS, verb: WRITE)
 
   """

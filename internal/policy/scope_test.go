@@ -296,3 +296,60 @@ func TestScopeFallbackIsTheMostPrivilegedCombination(t *testing.T) {
 		}
 	}
 }
+
+// TestPublicCannotBeNarrowedAway pins the exception, and the reason it is not a convenience.
+//
+// What sits behind PUBLIC answers without any credential at all. A token scoped away from it
+// would therefore reach *less* than an anonymous caller — and the one field there is exists to
+// answer when everything else is refused, so that its owner can tell a broken credential from
+// a broken route. Losing that is the one thing a narrowing must not do.
+//
+// Found by writing TestAMintedTokenIsNarrowedAtTheDoor: a freshly minted PLANNING-only token
+// could not ask the server for its own version.
+func TestPublicCannotBeNarrowedAway(t *testing.T) {
+	t.Parallel()
+
+	public := policy.Scope{Area: policy.ScopeAreaPublic, Verb: policy.ScopeVerbRead}
+
+	for _, held := range []([]string){
+		nil,
+		{},
+		{"PLANNING:READ"},
+		{"ADMIN:WRITE"},
+		{"WISHES:READ"},
+		{"PROFILE:READ", "PLANNING:WRITE"},
+	} {
+		actor := principal.Actor{Kind: principal.KindToken, Scopes: held}
+		if !policy.ScopesAllow(actor, public) {
+			t.Errorf("a token holding %v cannot read PUBLIC — it would see less than an "+
+				"anonymous caller", held)
+		}
+	}
+}
+
+// TestOnlyPublicIsExempt keeps that exception from spreading.
+//
+// Every other area has to be refusable, or a scope list would stop being a narrowing. Written
+// as a sweep so that a new area is covered the day it is added.
+func TestOnlyPublicIsExempt(t *testing.T) {
+	t.Parallel()
+
+	// A token that holds exactly one scope, in an area of its own.
+	actor := principal.Actor{Kind: principal.KindToken, Scopes: []string{"PLANNING:READ"}}
+
+	for _, area := range policy.AllScopeAreas() {
+		want := policy.Scope{Area: area, Verb: policy.ScopeVerbRead}
+		allowed := policy.ScopesAllow(actor, want)
+
+		switch area {
+		case policy.ScopeAreaPublic, policy.ScopeAreaPlanning:
+			if !allowed {
+				t.Errorf("%s should be reachable", want)
+			}
+		default:
+			if allowed {
+				t.Errorf("%s is reachable for a token that does not hold it", want)
+			}
+		}
+	}
+}

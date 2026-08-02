@@ -8,6 +8,7 @@ import (
 
 	"github.com/obcode/tallox.go/graph/model"
 	"github.com/obcode/tallox.go/internal/domain"
+	"github.com/obcode/tallox.go/internal/policy"
 )
 
 // This file holds what the token resolvers translate with. It is separate because gqlgen
@@ -63,6 +64,10 @@ func userFacing(err error) error {
 		// The same code and the same sentence for "does not exist" and "belongs to somebody
 		// else" — the difference is not information the caller is entitled to.
 		return refusal("TOKEN_NOT_FOUND", "Dieses Token existiert nicht.")
+	case errors.Is(err, domain.ErrScopeUnknown):
+		return refusal("SCOPE_UNKNOWN", "Diesen Scope kennt der Server nicht.")
+	case errors.Is(err, domain.ErrScopeRepeated):
+		return refusal("SCOPE_REPEATED", "Jeder Scope darf nur einmal angegeben werden.")
 	case errors.Is(err, domain.ErrNotAuthenticated):
 		return refusal("UNAUTHENTICATED", "Nicht angemeldet.")
 	default:
@@ -86,4 +91,25 @@ func refusal(code, message string) error {
 		Message:    message,
 		Extensions: map[string]any{"code": code},
 	}
+}
+
+// requestedScopes turns the input list into the policy's own type.
+//
+// nil in, nil out — and that matters: the argument is optional, so "not supplied" and "supplied
+// as an empty list" both arrive here as an empty slice, and both mean the same thing. An
+// unrestricted token is what somebody who did not think about scopes gets, which is the
+// behaviour that existed before scopes could be chosen at all.
+//
+// No validation here. The enums have already refused anything the schema does not know, and
+// what remains — a repeated entry — is internal/domain's to reject, because a resolver that
+// decided it would be a second place holding the rule.
+func requestedScopes(input []*model.ScopeGrantInput) []policy.Scope {
+	out := make([]policy.Scope, 0, len(input))
+	for _, entry := range input {
+		if entry == nil {
+			continue
+		}
+		out = append(out, policy.Scope{Area: entry.Area, Verb: entry.Verb})
+	}
+	return out
 }

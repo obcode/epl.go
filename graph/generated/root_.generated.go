@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
+	"github.com/obcode/tallox.go/graph/model"
 	"github.com/obcode/tallox.go/internal/policy"
 	gqlparser "github.com/vektah/gqlparser/v2"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -53,7 +54,7 @@ type ComplexityRoot struct {
 	Mutation struct {
 		AdvanceSemesterPhase      func(childComplexity int, id string, to policy.Phase) int
 		CreatePerson              func(childComplexity int, mail string, name *string) int
-		CreatePersonalAccessToken func(childComplexity int, description string, expiresInDays *int) int
+		CreatePersonalAccessToken func(childComplexity int, description string, expiresInDays *int, scopes []*model.ScopeGrantInput) int
 		CreateSemester            func(childComplexity int, code string) int
 		PublishWishes             func(childComplexity int, id string) int
 		RenamePerson              func(childComplexity int, id string, name string) int
@@ -227,7 +228,7 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 			return 0, false
 		}
 
-		return e.ComplexityRoot.Mutation.CreatePersonalAccessToken(childComplexity, args["description"].(string), args["expiresInDays"].(*int)), true
+		return e.ComplexityRoot.Mutation.CreatePersonalAccessToken(childComplexity, args["description"].(string), args["expiresInDays"].(*int), args["scopes"].([]*model.ScopeGrantInput)), true
 	case "Mutation.createSemester":
 		if e.ComplexityRoot.Mutation.CreateSemester == nil {
 			break
@@ -575,7 +576,9 @@ func (e *executableSchema) Complexity(ctx context.Context, typeName, field strin
 func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 	opCtx := graphql.GetOperationContext(ctx)
 	ec := newExecutionContext(opCtx, e, make(chan graphql.DeferredResult))
-	inputUnmarshalMap := graphql.BuildUnmarshalerMap()
+	inputUnmarshalMap := graphql.BuildUnmarshalerMap(
+		ec.unmarshalInputScopeGrantInput,
+	)
 	first := true
 
 	switch opCtx.Operation.Operation {
@@ -916,6 +919,22 @@ enum ScopeArea {
   ` + "`" + `setPersonRoles` + "`" + `, ` + "`" + `setPersonActive` + "`" + `.
   """
   ADMIN
+}
+
+# An input type rather than the ` + "`" + `AREA:VERB` + "`" + ` strings the column stores, and the asymmetry with
+# PersonalAccessToken.scopes below is deliberate. On the way *in* the enums make a typo a query
+# error instead of a scope that is silently discarded — the caller finds out now rather than
+# when their script hits a refusal. On the way *out* the strings are honest: a token may carry a
+# scope a newer server wrote and this one cannot parse, and an enum would fail to marshal it.
+
+"""
+One ` + "`" + `area: verb` + "`" + ` pair, when creating a token.
+"""
+input ScopeGrantInput {
+  "Which part of the API. The fields belonging to each area are listed on ` + "`" + `ScopeArea` + "`" + `."
+  area: ScopeArea!
+  "` + "`" + `READ` + "`" + ` for queries, ` + "`" + `WRITE` + "`" + ` for mutations — and ` + "`" + `WRITE` + "`" + ` includes ` + "`" + `READ` + "`" + ` in the same area."
+  verb: ScopeVerb!
 }
 
 """
@@ -1318,6 +1337,22 @@ type Mutation {
     description: String!
     "How many days it should live. 90 if you leave this out, 365 at most, 1 at least."
     expiresInDays: Int
+    """
+    What this token may reach. **Leave it out and the token is unrestricted** — it can do
+    everything your roles allow.
+
+    A scope only ever narrows. Listing ` + "`" + `PLANNING: READ` + "`" + ` gives you a token that reads the
+    planning and nothing else, however much your roles would otherwise permit; it cannot give
+    you anything you do not already hold.
+
+    Which fields belong to which area is listed on ` + "`" + `ScopeArea` + "`" + `. ` + "`" + `WRITE` + "`" + ` includes ` + "`" + `READ` + "`" + ` in the
+    same area, so a token that reads and writes the planning needs one entry, not two.
+
+    Fixed at creation. There is no way to change the scopes of an existing token — mint a new
+    one and revoke this one, so that what the holder believes it can do and what it can do are
+    never two different things.
+    """
+    scopes: [ScopeGrantInput!]
   ): CreatedPersonalAccessToken! @interactiveOnly @scope(area: TOKENS, verb: WRITE)
 
   """

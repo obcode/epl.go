@@ -19,7 +19,7 @@ import (
 // region    ************************** generated!.gotpl **************************
 
 type MutationResolver interface {
-	CreatePersonalAccessToken(ctx context.Context, description string, expiresInDays *int) (*model.CreatedPersonalAccessToken, error)
+	CreatePersonalAccessToken(ctx context.Context, description string, expiresInDays *int, scopes []*model.ScopeGrantInput) (*model.CreatedPersonalAccessToken, error)
 	RevokePersonalAccessToken(ctx context.Context, id string) (*model.PersonalAccessToken, error)
 	CreatePerson(ctx context.Context, mail string, name *string) (*model.Person, error)
 	RenamePerson(ctx context.Context, id string, name string) (*model.Person, error)
@@ -97,6 +97,14 @@ func (ec *executionContext) field_Mutation_createPersonalAccessToken_args(ctx co
 		return nil, err
 	}
 	args["expiresInDays"] = arg1
+	arg2, err := graphql.ProcessArgField(ctx, rawArgs, "scopes",
+		func(ctx context.Context, v any) ([]*model.ScopeGrantInput, error) {
+			return ec.unmarshalOScopeGrantInput2ᚕᚖgithubᚗcomᚋobcodeᚋtalloxᚗgoᚋgraphᚋmodelᚐScopeGrantInputᚄ(ctx, v)
+		})
+	if err != nil {
+		return nil, err
+	}
+	args["scopes"] = arg2
 	return args, nil
 }
 
@@ -285,7 +293,7 @@ func (ec *executionContext) _Mutation_createPersonalAccessToken(ctx context.Cont
 		},
 		func(ctx context.Context) (any, error) {
 			fc := graphql.GetFieldContext(ctx)
-			return ec.Resolvers.Mutation().CreatePersonalAccessToken(ctx, fc.Args["description"].(string), fc.Args["expiresInDays"].(*int))
+			return ec.Resolvers.Mutation().CreatePersonalAccessToken(ctx, fc.Args["description"].(string), fc.Args["expiresInDays"].(*int), fc.Args["scopes"].([]*model.ScopeGrantInput))
 		},
 		func(ctx context.Context, next graphql.Resolver) graphql.Resolver {
 			directive0 := next
