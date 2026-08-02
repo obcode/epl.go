@@ -92,6 +92,17 @@ enum ScopeArea {
   PROFILE
 
   """
+  The planning process: which semesters exist, where each one stands, and — as they arrive —
+  the demand, the assignments and the statistics.
+
+  The first area worth narrowing a token to. `PUBLIC` and `PROFILE` are you describing
+  yourself; `TOKENS` and `ADMIN` are unreachable through a token at all.
+
+  Fields: `semesters`, `semester`, `createSemester`, `advanceSemesterPhase`, `publishWishes`.
+  """
+  PLANNING
+
+  """
   Personal Access Token management. Not reachable through a token at all — those fields are
   `@interactiveOnly`, so that a leaked token cannot mint its successors.
 

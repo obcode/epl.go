@@ -59,6 +59,11 @@ models:
   # two are compared by tests (graph and internal/store).
   Role:
     model: github.com/obcode/tallox.go/internal/policy.Role
+  # Same argument as Role, and the same three homes: the schema, internal/policy and the CHECK
+  # constraint in db/migrations. Binding removes one; store.TestDatabaseAndPolicyAgreeOnPhases
+  # and graph.TestSchemaAndPolicyAgreeOnPhases compare the other two.
+  Phase:
+    model: github.com/obcode/tallox.go/internal/policy.Phase
   # Same argument as Role: the scope vocabulary exists in the schema and in internal/policy,
   # and binding removes the copy. Unlike Role there is no third home — a scope is a string in
   # a text[] column, not a CHECK constraint — because an older binary has to survive reading a

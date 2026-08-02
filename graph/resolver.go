@@ -23,4 +23,11 @@ type Resolver struct {
 	Tokens *domain.TokenService
 	// People is user administration, on the same terms as Tokens.
 	People *domain.PeopleService
+	// Planning is the semester workflow: which semesters exist and where each one stands.
+	//
+	// Named for the scope area rather than for the type, because `Semesters` would be shadowed
+	// by the generated queryResolver method of the same name — `r.Semesters` inside a resolver
+	// resolves to the method, and the resulting error is about a func having no field `List`,
+	// which takes a minute to read.
+	Planning *domain.SemesterService
 }

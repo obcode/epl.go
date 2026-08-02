@@ -64,6 +64,8 @@ type Options struct {
 	// People is user administration. Nil like Tokens: legitimate for a test that never
 	// reaches one of its fields.
 	People *domain.PeopleService
+	// Planning is the semester workflow, on the same terms.
+	Planning *domain.SemesterService
 }
 
 // Serve parses flags, sets up logging and runs the HTTP server until a signal arrives.
@@ -176,6 +178,7 @@ func Serve(build buildinfo.Info) {
 	directory := store.NewDirectory(pool)
 	tokens := domain.NewTokenService(store.NewTokens(pool), nil)
 	people := domain.NewPeopleService(store.NewPeople(pool), nil)
+	planning := domain.NewSemesterService(store.NewSemesters(pool))
 
 	srv := &http.Server{
 		Addr: cfg.Server.Addr(),
@@ -189,8 +192,9 @@ func Serve(build buildinfo.Info) {
 				Tokens:  directory,
 				DevUser: cfg.Auth.DevUser,
 			},
-			Tokens: tokens,
-			People: people,
+			Tokens:   tokens,
+			People:   people,
+			Planning: planning,
 		}),
 		ReadHeaderTimeout: 10 * time.Second,
 	}
@@ -325,7 +329,12 @@ func router(opts Options) http.Handler {
 // transport that nobody has thought about is an auth path that nobody has thought about.
 func graphqlHandler(opts Options) http.Handler {
 	srv := handler.New(generated.NewExecutableSchema(generated.Config{
-		Resolvers: &graph.Resolver{Build: opts.Build, Tokens: opts.Tokens, People: opts.People},
+		Resolvers: &graph.Resolver{
+			Build:    opts.Build,
+			Tokens:   opts.Tokens,
+			People:   opts.People,
+			Planning: opts.Planning,
+		},
 		// The generated code fails closed on a directive with no implementation — the field
 		// errors with "directive interactiveOnly is not implemented" rather than passing
 		// through. So forgetting this line breaks token management loudly instead of
